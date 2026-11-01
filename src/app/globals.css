@@ -46,6 +46,14 @@
 
 :root {
   --focus-ring: var(--c-violet);
+  /* Highest point of the in-world prompt, so it never slides under the HUD (two rows on phones). */
+  --prompt-min-top: calc(env(safe-area-inset-top, 0px) + 11rem);
+}
+
+@media (min-width: 40rem) {
+  :root {
+    --prompt-min-top: calc(env(safe-area-inset-top, 0px) + 7.5rem);
+  }
 }
 
 html {
@@ -116,6 +124,22 @@ body {
 
 .pixelated {
   image-rendering: pixelated;
+}
+
+/* Two-step bob for the in-world "E / Tap" prompt (disabled by the reduced-motion rule below). */
+@keyframes prompt-bob {
+  0%,
+  49% {
+    transform: translateY(0);
+  }
+  50%,
+  100% {
+    transform: translateY(-2px);
+  }
+}
+
+.prompt-bob {
+  animation: prompt-bob 0.9s steps(1) infinite;
 }
 
 .sr-only-focusable:not(:focus):not(:focus-within) {

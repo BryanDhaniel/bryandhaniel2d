@@ -6,14 +6,23 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from
 import { getSection, portfolio, type SectionId } from "@/content/portfolio";
 import { ASSET_SOURCES } from "@/game/assets/manifest";
 import { GameBridge, type GameToUiEvents, type MapInfo } from "@/game/bridge";
+import type {
+  DayPhase,
+  QualityLevel,
+  QualitySetting,
+  TimeMode,
+  WeatherKind,
+} from "@/game/settings/types";
 import { AudioSystem } from "@/game/systems/audio";
 import { useCapabilities } from "@/lib/capabilities";
 import { useMediaQuery, useStoredValue } from "@/lib/hooks";
-import { STORAGE_KEYS, writeFlag } from "@/lib/storage";
+import { defaultQualityFor, storedQuality, storedTimeMode, storedWeather } from "@/lib/settings";
+import { STORAGE_KEYS, writeFlag, writeStorage } from "@/lib/storage";
 import { ControlsHint } from "./ControlsHint";
 import { DPad } from "./DPad";
 import { GameErrorBoundary } from "./GameErrorBoundary";
 import { Hud } from "./Hud";
+import { InteractionPrompt } from "./InteractionPrompt";
 import { LoadingScreen } from "./LoadingScreen";
 import { GameErrorNotice, LowFpsToast, PlainViewOffer, WebGLFallback } from "./Notices";
 import { SectionPanel } from "./SectionPanel";
@@ -33,7 +42,13 @@ export function VillageApp() {
   const touch = useMediaQuery("(pointer: coarse)");
   const playAnyway = useStoredValue("session", STORAGE_KEYS.playAnyway) === "1";
   const muted = useStoredValue("local", STORAGE_KEYS.muted) === "1";
-  const night = useStoredValue("local", STORAGE_KEYS.night) === "1";
+  const timeMode = storedTimeMode(useStoredValue("local", STORAGE_KEYS.timeMode));
+  const weather = storedWeather(useStoredValue("local", STORAGE_KEYS.weather));
+  const quality = storedQuality(
+    useStoredValue("local", STORAGE_KEYS.quality),
+    defaultQualityFor({ touch, reducedMotion, lowPower: capabilities?.lowPower ?? false }),
+  );
+  const retro = useStoredValue("local", STORAGE_KEYS.retro) === "1";
 
   const [bridge] = useState(() => new GameBridge());
   const [audio] = useState(() => new AudioSystem(ASSET_SOURCES.audio));
@@ -45,6 +60,8 @@ export function VillageApp() {
   const [location, setLocation] = useState(DEFAULT_LOCATION);
   const [moved, setMoved] = useState(false);
   const [lowFps, setLowFps] = useState(false);
+  const [phase, setPhase] = useState<DayPhase | null>(null);
+  const [qualityLevel, setQualityLevel] = useState<QualityLevel | null>(null);
   const gameRef = useRef<HTMLDivElement>(null);
   const hintId = useId();
 
@@ -75,6 +92,8 @@ export function VillageApp() {
       bridge.on("location", ({ name }) => setLocation(name)),
       bridge.on("moved", () => setMoved(true)),
       bridge.on("lowFps", () => setLowFps(true)),
+      bridge.on("clock", (next) => setPhase(next.phase)),
+      bridge.on("qualityLevel", (next) => setQualityLevel(next.level)),
       bridge.on("fatal", (next) => setFatal(next)),
     ];
     return () => subscriptions.forEach((off) => off());
@@ -104,6 +123,8 @@ export function VillageApp() {
       setFatal(null);
       setLowFps(false);
       setLocation(DEFAULT_LOCATION);
+      setPhase(null);
+      setQualityLevel(null);
     },
     [],
   );
@@ -122,9 +143,27 @@ export function VillageApp() {
     }
   };
 
-  const toggleNight = () => {
-    writeFlag("local", STORAGE_KEYS.night, !night);
-    bridge.emit("night", { enabled: !night });
+  const changeTimeMode = (mode: TimeMode) => {
+    writeStorage("local", STORAGE_KEYS.timeMode, mode);
+    bridge.emit("setTimeMode", { mode });
+    audio.play("blip");
+  };
+
+  const changeWeather = (kind: WeatherKind) => {
+    writeStorage("local", STORAGE_KEYS.weather, kind);
+    bridge.emit("setWeather", { kind });
+    audio.play("blip");
+  };
+
+  const changeQuality = (setting: QualitySetting) => {
+    writeStorage("local", STORAGE_KEYS.quality, setting);
+    bridge.emit("setQuality", { setting });
+    audio.play("blip");
+  };
+
+  const changeRetro = (enabled: boolean) => {
+    writeFlag("local", STORAGE_KEYS.retro, enabled);
+    bridge.emit("setRetro", { enabled });
     audio.play("blip");
   };
 
@@ -193,15 +232,35 @@ export function VillageApp() {
           bridge={bridge}
           mapInfo={mapInfo}
           location={location}
+          phase={phase}
           near={near}
           nearTitle={near ? getSection(near.sectionId).title : null}
           touch={touch}
           muted={muted}
-          night={night}
           inert={panelOpen || !ready}
+          settings={{
+            timeMode,
+            weather,
+            quality,
+            qualityLevel,
+            retro,
+            onTimeMode: changeTimeMode,
+            onWeather: changeWeather,
+            onQuality: changeQuality,
+            onRetro: changeRetro,
+          }}
           onToggleMute={toggleMute}
-          onToggleNight={toggleNight}
           onTravel={travel}
+        />
+
+        <InteractionPrompt
+          bridge={bridge}
+          touch={touch}
+          hidden={panelOpen || !ready}
+          onActivate={() => {
+            bridge.emit("interact", null);
+            focusGame();
+          }}
         />
 
         <ControlsHint id={hintId} visible={ready && !moved && !panelOpen} touch={touch} />

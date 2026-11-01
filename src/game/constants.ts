@@ -4,18 +4,20 @@ export const SCENES = {
   world: "world",
 } as const;
 
-/** Render order. Characters, trees and buildings sort by their feet: ENTITY + y. */
+/**
+ * Render order. Characters, trees, props and buildings sort by their feet: ENTITY + y.
+ * Visual tunables (camera, lighting, effects) live in config/visuals.ts.
+ */
 export const DEPTH = {
   ground: 0,
   obstacles: 1,
   shadow: 5,
-  marker: 6,
+  marker: 8,
   entity: 10,
-  night: 5000,
-  lights: 5001,
-  fireflies: 5002,
+  fog: 4900,
+  weather: 4950,
+  fireflies: 5000,
   emote: 5500,
-  prompt: 6000,
 } as const;
 
 export const PLAYER = {
@@ -23,15 +25,6 @@ export const PLAYER = {
   runMultiplier: 1.6,
   /** Physics body at the feet, smaller than the sprite so 1-tile gaps are passable. */
   body: { width: 10, height: 6, offsetX: 3, offsetY: 10 },
-} as const;
-
-export const CAMERA = {
-  lerp: 0.12,
-  /** Aim for roughly this many world pixels on the short side (320x180 on a 1080p screen). */
-  targetShortSide: 180,
-  /** Beyond this many world pixels (or the world's own size) the view is letterboxed. */
-  maxViewWidth: 480,
-  maxViewHeight: 480,
 } as const;
 
 export const INTERACTION = {

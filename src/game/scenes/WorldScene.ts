@@ -1,82 +1,103 @@
 import * as Phaser from "phaser";
-import type { SectionId } from "@/content/portfolio";
-import { KEYS } from "@/game/assets/manifest";
-import { ANIMS } from "@/game/assets/textures";
+import { KEYS, TEXTURE_GROUPS, normalMapUrl, type TextureGroup } from "@/game/assets/manifest";
+import { ANIMS, attachNormalMap, generateNormalMap } from "@/game/assets/textures";
 import type { MapMarker, PlayerPosition } from "@/game/bridge";
-import { CAMERA, DEPTH, PLAYER, SCENES } from "@/game/constants";
-import { Building } from "@/game/entities/Building";
+import { POST, QUALITY, RENDER, WATER } from "@/game/config/visuals";
+import { DEPTH, PLAYER, SCENES } from "@/game/constants";
+import type { Building } from "@/game/entities/Building";
 import { Npc } from "@/game/entities/Npc";
 import { Player } from "@/game/entities/Player";
-import {
-  buildNavigation,
-  isTiledMap,
-  objectLayer,
-  objectProperty,
-  objectType,
-} from "@/game/map/navigation";
-import { LAYER, OBJECT_TYPE, TILESET, gid, isWaterGid } from "@/game/map/tiled";
-import { DEFAULT_AREA_NAME, TILE_SIZE, type NpcKind } from "@/game/map/village";
-import { int } from "@/game/palette";
+import { DayNightCycle } from "@/game/lighting/DayNightCycle";
+import { LightManager, type LightHandle } from "@/game/lighting/LightManager";
+import { isTiledMap } from "@/game/map/navigation";
+import { TILESET, gid, isWaterGid, type TiledMap } from "@/game/map/tiled";
+import { DEFAULT_AREA_NAME, TILE_SIZE } from "@/game/map/village";
+import { PALETTE, int } from "@/game/palette";
 import { getServices, type Services } from "@/game/services";
-import { DayNightSystem } from "@/game/systems/DayNightSystem";
+import { QUALITY_FEATURES, QualityManager } from "@/game/settings/QualityManager";
+import type { DayPhase, QualityLevel } from "@/game/settings/types";
+import { ShadowSystem } from "@/game/shadows/ShadowSystem";
+import { WorldUniforms, attachWorldUniforms } from "@/game/shaders/pipelines";
+import {
+  POST_FX,
+  PostSettings,
+  RetroPostFX,
+  RetroSettings,
+  VillagePostFX,
+} from "@/game/shaders/postfx";
 import { InputSystem } from "@/game/systems/InputSystem";
 import { InteractionSystem } from "@/game/systems/InteractionSystem";
-import { PixelCamera } from "@/game/systems/PixelCamera";
+import { SmoothCamera } from "@/game/systems/SmoothCamera";
 import { GridPathfinder } from "@/game/systems/pathfinding";
-import { computeViewport } from "@/game/systems/viewport";
+import { waterMaskCanvas } from "@/game/systems/waterMask";
+import { WeatherSystem } from "@/game/weather/WeatherSystem";
+import { buildWorld, type WorldParts } from "@/game/world/WorldBuilder";
+import { GENERATED_GROUPS_KEY } from "./PreloadScene";
 
-const SECTION_IDS: ReadonlySet<string> = new Set<SectionId>([
-  "about",
-  "projects",
-  "education",
-  "skills",
-  "contact",
-]);
-const NPC_KINDS: ReadonlySet<string> = new Set<NpcKind>(["cat", "villager", "elder"]);
-
-function isSectionId(value: unknown): value is SectionId {
-  return typeof value === "string" && SECTION_IDS.has(value);
-}
-
-function isNpcKind(value: string): value is NpcKind {
-  return NPC_KINDS.has(value);
-}
-
-interface Area {
-  name: string;
-  rect: Phaser.Geom.Rectangle;
-}
-
-const WATER_FRAME_MS = 450;
 const LOCATION_CHECK_MS = 200;
 const POSITION_EMIT_MS = 100;
+const GLOW_ALPHA = 0.45;
+
+function floats(hex: string): [number, number, number] {
+  const value = Number.parseInt(hex.slice(1), 16);
+  return [((value >> 16) & 255) / 255, ((value >> 8) & 255) / 255, (value & 255) / 255];
+}
+
+const SKY = floats(PALETTE.sky);
+const FOAM = floats(PALETTE.foam);
+
+function yieldToBrowser(): Promise<void> {
+  return new Promise((resolve) => {
+    const channel = new MessageChannel();
+    channel.port1.onmessage = () => {
+      channel.port1.close();
+      resolve();
+    };
+    channel.port2.postMessage(null);
+  });
+}
 
 export class WorldScene extends Phaser.Scene {
   private services!: Services;
+  private parts!: WorldParts;
   private player!: Player;
   private controls!: InputSystem;
   private interaction!: InteractionSystem;
-  private dayNight!: DayNightSystem;
+  private camera!: SmoothCamera;
+  private cycle!: DayNightCycle;
+  private lighting!: LightManager;
+  private shadows!: ShadowSystem;
+  private weather!: WeatherSystem;
+  private quality!: QualityManager;
   private finder!: GridPathfinder;
   private marker!: Phaser.GameObjects.Sprite;
   private dust!: Phaser.GameObjects.Group;
-  private readonly buildings: Building[] = [];
+  private playerLight!: LightHandle;
+  private uniforms = new WorldUniforms();
+  private readonly postSettings = new PostSettings();
+  private readonly retroSettings = new RetroSettings();
   private readonly npcs: Npc[] = [];
-  private readonly areas: Area[] = [];
   private readonly waterTiles: Phaser.Tilemaps.Tile[] = [];
   private waterMasks = new Uint8Array(0);
   private waterFrame = 0;
+  private waterTexture: WebGLTexture | null = null;
+  private retroEnabled = false;
+  private level: QualityLevel = "high";
   private pendingBuilding: Building | null = null;
   private hasMoved = false;
+  private alive = false;
   private locationName = "";
+  private phase: DayPhase | null = null;
   private locationTimer = 0;
   private positionTimer = 0;
   private fpsTimer = 0;
   private fpsLowStreak = 0;
   private fpsReported = false;
   private elapsed = 0;
+  private readonly ambient = new Float32Array(3);
+  private readonly view = new Phaser.Geom.Rectangle();
   private readonly position: PlayerPosition = { x: 0, y: 0 };
-  private readonly pointerWorld = new Phaser.Math.Vector2();
+  private readonly canvasPoint = { x: 0, y: 0 };
   private readonly unsubscribe: (() => void)[] = [];
 
   constructor() {
@@ -97,170 +118,51 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private build(): void {
-    const { bridge, options } = this.services;
+    const { bridge, options, viewport } = this.services;
     this.resetState();
+    this.alive = true;
 
-    // ---- Map ----
     const cached: unknown = this.cache.tilemap.get(KEYS.map);
     const json = cached && typeof cached === "object" && "data" in cached ? cached.data : null;
     if (!isTiledMap(json)) {
       throw new Error("The village map data is missing or invalid.");
     }
-    const map = this.make.tilemap({ key: KEYS.map });
-    const tileset = map.addTilesetImage(
-      map.tilesets[0]?.name ?? TILESET.name,
-      KEYS.tiles,
-      TILE_SIZE,
-      TILE_SIZE,
-      0,
-      0,
-    );
-    if (!tileset) {
-      throw new Error("The village tileset could not be attached.");
-    }
-    const ground = map.createLayer(LAYER.ground, tileset, 0, 0);
-    const obstacles = map.createLayer(LAYER.obstacles, tileset, 0, 0);
-    if (!ground || !obstacles) {
-      throw new Error('The map needs "ground" and "obstacles" tile layers.');
-    }
-    ground.setDepth(DEPTH.ground);
-    obstacles.setDepth(DEPTH.obstacles);
-    ground.setCollisionBetween(
-      gid(TILESET.water),
-      gid(TILESET.water + TILESET.waterFrames * 16 - 1),
-    );
-    obstacles.setCollisionByExclusion([-1]);
 
-    const worldWidth = map.widthInPixels;
-    const worldHeight = map.heightInPixels;
+    // ---- Lighting, shadows and the world itself ----
+    this.uniforms = new WorldUniforms();
+    if (options.reducedMotion) {
+      this.uniforms.windAmplitude = 0;
+    }
+    attachWorldUniforms(this.game, this.uniforms);
+    this.lighting = new LightManager(this.uniforms);
+    this.shadows = new ShadowSystem(this);
+    this.parts = buildWorld(this, json, this.lighting, this.shadows, options.reducedMotion);
+    const { worldWidth, worldHeight, navigation, solids } = this.parts;
     this.physics.world.setBounds(0, 0, worldWidth, worldHeight);
-
-    const navigation = buildNavigation(json);
     this.finder = new GridPathfinder(navigation.width, navigation.height, navigation.walkable);
-
-    // ---- Objects ----
-    const solids = this.physics.add.staticGroup();
-    const glows: Phaser.GameObjects.Image[] = [];
-    const fireflySpots: { x: number; y: number }[] = [];
-    let spawnX = worldWidth / 2;
-    let spawnY = worldHeight / 2;
-    const npcSpawns: { kind: NpcKind; x: number; y: number }[] = [];
-
-    for (const object of objectLayer(json)?.objects ?? []) {
-      const type = objectType(object);
-      switch (type) {
-        case OBJECT_TYPE.building: {
-          const section = objectProperty(object, "section");
-          if (!isSectionId(section)) {
-            console.warn(`Building "${object.name}" has no valid "section" property; skipping it.`);
-            break;
-          }
-          const doorX = objectProperty(object, "doorX");
-          const doorY = objectProperty(object, "doorY");
-          const label = objectProperty(object, "label");
-          this.buildings.push(
-            new Building(this, solids, {
-              id: object.name,
-              sectionId: section,
-              label: typeof label === "string" ? label : object.name,
-              x: object.x,
-              y: object.y,
-              width: object.width,
-              height: object.height,
-              doorTileX:
-                typeof doorX === "number"
-                  ? doorX
-                  : Math.floor((object.x + object.width / 2) / TILE_SIZE),
-              doorTileY:
-                typeof doorY === "number"
-                  ? doorY
-                  : Math.floor((object.y + object.height) / TILE_SIZE) - 1,
-            }),
-          );
-          break;
-        }
-        case OBJECT_TYPE.fountain: {
-          const fountain = this.add
-            .sprite(object.x, object.y + object.height, KEYS.props, "fountain/0")
-            .setOrigin(0, 1)
-            .setDepth(DEPTH.entity + object.y + object.height);
-          if (!options.reducedMotion) {
-            fountain.play(ANIMS.fountain);
-          }
-          solids.add(
-            this.add.zone(
-              object.x + object.width / 2,
-              object.y + object.height * 0.6,
-              object.width - 2,
-              object.height * 0.6,
-            ),
-          );
-          break;
-        }
-        case OBJECT_TYPE.tree: {
-          const x = object.x + TILE_SIZE / 2;
-          const y = object.y + TILE_SIZE - 2;
-          const tree = this.add
-            .sprite(x, y, KEYS.props, "tree/1")
-            .setOrigin(0.5, 1)
-            .setDepth(DEPTH.entity + y);
-          if (!options.reducedMotion) {
-            tree.play({ key: ANIMS.treeSway, startFrame: Math.floor(Math.random() * 4) });
-            tree.anims.timeScale = 0.8 + Math.random() * 0.4;
-          }
-          solids.add(this.add.zone(x, y - 3, 8, 6));
-          fireflySpots.push({ x, y: y - 20 });
-          break;
-        }
-        case OBJECT_TYPE.lamp: {
-          const x = object.x + TILE_SIZE / 2;
-          const y = object.y + TILE_SIZE - 1;
-          this.add
-            .image(x, y, KEYS.props, "lamp")
-            .setOrigin(0.5, 1)
-            .setDepth(DEPTH.entity + y);
-          glows.push(this.add.image(x, y - 21, KEYS.props, "glow"));
-          solids.add(this.add.zone(x, y - 2, 6, 4));
-          fireflySpots.push({ x, y: y - 10 });
-          break;
-        }
-        case OBJECT_TYPE.spawn: {
-          if (object.name === "player") {
-            spawnX = object.x;
-            spawnY = object.y + 4;
-          } else if (isNpcKind(object.name)) {
-            npcSpawns.push({ kind: object.name, x: object.x, y: object.y + 4 });
-          }
-          break;
-        }
-        case OBJECT_TYPE.area:
-          this.areas.push({
-            name: object.name,
-            rect: new Phaser.Geom.Rectangle(object.x, object.y, object.width, object.height),
-          });
-          break;
-        default:
-          break;
-      }
-    }
+    this.shadows.setLamps(this.parts.lampPoints);
 
     // ---- Characters ----
-    this.player = new Player(this, spawnX, spawnY, (x, y) => this.onStep(x, y));
-    for (const spawn of npcSpawns) {
-      this.npcs.push(
-        new Npc(
-          this,
-          spawn.kind,
-          spawn.x,
-          spawn.y,
-          this.finder,
-          Math.floor(spawn.x / TILE_SIZE),
-          Math.floor(spawn.y / TILE_SIZE),
-        ),
+    const { spawn } = this.parts;
+    this.player = new Player(this, spawn.x, spawn.y, (x, y) => this.onStep(x, y));
+    this.lighting.register(this.player, this.player.texture);
+    this.shadows.addCharacter(this.player);
+    this.playerLight = this.lighting.addLight("player", spawn.x, spawn.y - 2, true);
+    for (const npcSpawn of this.parts.npcSpawns) {
+      const npc = new Npc(
+        this,
+        npcSpawn.kind,
+        npcSpawn.x,
+        npcSpawn.y,
+        this.finder,
+        Math.floor(npcSpawn.x / TILE_SIZE),
+        Math.floor(npcSpawn.y / TILE_SIZE),
       );
+      this.lighting.register(npc, npc.texture);
+      this.shadows.addCharacter(npc, npcSpawn.kind === "cat");
+      this.npcs.push(npc);
     }
-    const blockers = [ground, obstacles, solids];
-    for (const blocker of blockers) {
+    for (const blocker of [this.parts.ground, this.parts.obstacles, solids]) {
       this.physics.add.collider(this.player, blocker);
       this.physics.add.collider(this.npcs, blocker);
     }
@@ -272,40 +174,43 @@ export class WorldScene extends Phaser.Scene {
       .setDepth(DEPTH.marker)
       .setVisible(false);
 
-    // ---- Camera ----
-    const camera = new PixelCamera(0, 0, this.scale.gameSize.width, this.scale.gameSize.height);
-    this.cameras.remove(this.cameras.main, true);
-    this.cameras.addExisting(camera, true);
-    camera.setRoundPixels(false);
+    // ---- Camera: whole-texel scroll plus a sub-texel canvas offset ----
+    const camera = this.cameras.main;
+    camera.setRoundPixels(true);
     camera.setBackgroundColor(int("forest"));
-    camera.setBounds(0, 0, worldWidth, worldHeight);
-    camera.startFollow(
-      this.player,
-      false,
-      options.reducedMotion ? 0.3 : CAMERA.lerp,
-      options.reducedMotion ? 0.3 : CAMERA.lerp,
+    this.camera = new SmoothCamera(
+      camera,
+      viewport.layout,
+      worldWidth,
+      worldHeight,
+      viewport.setOffset,
     );
-    camera.setFollowOffset(0, 8);
-    camera.centerOn(this.player.x, this.player.y - 8);
+    this.camera.snapTo(this.player.x, this.player.y - RENDER.cameraFocusOffsetY);
+    this.scale.on(Phaser.Scale.Events.RESIZE, this.onResize, this);
 
     // ---- Systems ----
     this.controls = new InputSystem(this, this.finder);
-    this.interaction = new InteractionSystem(this, this.buildings, bridge, options);
-    this.dayNight = new DayNightSystem(
+    this.interaction = new InteractionSystem(this.parts.buildings, bridge);
+    this.cycle = new DayNightCycle(options.timeMode, options.reducedMotion);
+    this.weather = new WeatherSystem(
       this,
-      worldWidth,
-      worldHeight,
-      this.buildings.flatMap((building) => (building.lights ? [building.lights] : [])),
-      glows,
-      fireflySpots,
+      options.weather,
+      this.parts.fireflySpots,
       options.reducedMotion,
     );
-    this.dayNight.set(options.night, true);
-    this.layout();
-    this.scale.on(Phaser.Scale.Events.RESIZE, this.layout, this);
+    this.retroEnabled = options.retro;
+    this.quality = new QualityManager(options.quality, (level, setting) => {
+      this.applyQuality(level);
+      bridge.emit("qualityLevel", { level, setting });
+    });
+    this.applyQuality(this.quality.level);
+    bridge.emit("qualityLevel", {
+      level: this.quality.level,
+      setting: this.quality.currentSetting,
+    });
 
-    // ---- Animated water ----
-    ground.forEachTile((tile) => {
+    // ---- Animated water tiles ----
+    this.parts.ground.forEachTile((tile) => {
       if (isWaterGid(tile.index)) {
         this.waterTiles.push(tile);
       }
@@ -316,7 +221,7 @@ export class WorldScene extends Phaser.Scene {
     );
     if (!options.reducedMotion && this.waterTiles.length > 0) {
       this.time.addEvent({
-        delay: WATER_FRAME_MS,
+        delay: WATER.frameMs,
         loop: true,
         callback: this.animateWater,
         callbackScope: this,
@@ -332,7 +237,13 @@ export class WorldScene extends Phaser.Scene {
         this.pendingBuilding = null;
         this.marker.setVisible(false);
       }),
-      bridge.on("night", ({ enabled }) => this.dayNight.set(enabled)),
+      bridge.on("setTimeMode", ({ mode }) => this.cycle.setMode(mode)),
+      bridge.on("setWeather", ({ kind }) => this.weather.setKind(kind)),
+      bridge.on("setQuality", ({ setting }) => this.quality.setSetting(setting)),
+      bridge.on("setRetro", ({ enabled }) => {
+        this.retroEnabled = enabled;
+        this.applyPostPipelines();
+      }),
       bridge.on("dpad", ({ x, y }) => {
         this.controls.setDpad(x, y);
         if (x !== 0 || y !== 0) {
@@ -343,8 +254,9 @@ export class WorldScene extends Phaser.Scene {
       bridge.on("interact", () => this.controls.queueInteract()),
       bridge.on("travel", ({ sectionId }) => {
         const building =
-          this.buildings.find((entry) => entry.sectionId === sectionId && entry.id !== "mailbox") ??
-          this.buildings.find((entry) => entry.sectionId === sectionId);
+          this.parts.buildings.find(
+            (entry) => entry.sectionId === sectionId && entry.id !== "mailbox",
+          ) ?? this.parts.buildings.find((entry) => entry.sectionId === sectionId);
         if (building) {
           this.goToBuilding(building);
         }
@@ -354,7 +266,7 @@ export class WorldScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, this.teardown, this);
     this.events.once(Phaser.Scenes.Events.DESTROY, this.teardown, this);
 
-    const markers: MapMarker[] = this.buildings
+    const markers: MapMarker[] = this.parts.buildings
       .filter((building) => building.id !== "mailbox")
       .map((building) => ({
         buildingId: building.id,
@@ -370,15 +282,21 @@ export class WorldScene extends Phaser.Scene {
       markers,
     });
     this.updateLocation();
+
+    // Normal maps, shadow baking and the water mask wait until the first frame is on screen.
+    this.events.once(Phaser.Scenes.Events.POST_UPDATE, () => {
+      void this.runDeferredWork(json).catch((error: unknown) => console.error(error));
+    });
   }
 
   override update(time: number, delta: number): void {
-    if (!this.player || !this.controls) {
+    if (!this.alive || !this.player || !this.controls) {
       return;
     }
-    const { bridge } = this.services;
+    const { bridge, viewport } = this.services;
     this.elapsed += delta;
 
+    // ---- Movement ----
     this.controls.update(this.player.x, this.player.bodyCenterY, delta);
     const intent = this.controls.intent;
     this.player.drive(intent.x, intent.y, this.controls.run ? PLAYER.runMultiplier : 1);
@@ -387,8 +305,51 @@ export class WorldScene extends Phaser.Scene {
       bridge.emit("moved", null);
     }
     this.player.syncDepth();
+    this.lighting.move(this.playerLight, this.player.x, this.player.y - 2);
 
-    this.interaction.update(this.player.x, this.player.y);
+    // ---- Camera ----
+    const lerp = this.services.options.reducedMotion
+      ? RENDER.cameraLerpReducedMotion
+      : RENDER.cameraLerp;
+    this.camera.update(this.player.x, this.player.y - RENDER.cameraFocusOffsetY, delta, lerp);
+    const layout = viewport.layout;
+    const camera = this.cameras.main;
+    this.view.setTo(camera.scrollX, camera.scrollY, layout.canvasWidth, layout.canvasHeight);
+
+    // ---- Time of day, lights and shadows ----
+    this.cycle.update(delta);
+    const state = this.cycle.state;
+    const weatherScale = this.weather.ambientScale;
+    this.ambient[0] = (state.ambient[0] ?? 1) * weatherScale;
+    this.ambient[1] = (state.ambient[1] ?? 1) * weatherScale;
+    this.ambient[2] = (state.ambient[2] ?? 1) * weatherScale;
+    this.lighting.update(
+      time,
+      this.view,
+      camera.scrollX,
+      camera.scrollY,
+      state.lightsOn,
+      this.ambient,
+    );
+    this.uniforms.time = this.services.options.reducedMotion ? 0 : (time / 1000) % 3600;
+    this.shadows.update(state);
+    for (const building of this.parts.buildings) {
+      building.updateRoof(this.player.x, this.player.y, delta);
+      building.setLightsLevel(state.lightsOn);
+    }
+    if (!this.lighting.enabled) {
+      const glow = state.lightsOn * GLOW_ALPHA;
+      for (const image of this.parts.glows) {
+        if (Math.abs(image.alpha - glow) > 0.004) image.setAlpha(glow);
+      }
+    }
+    if (state.phase !== this.phase) {
+      this.phase = state.phase;
+      bridge.emit("clock", { phase: state.phase });
+    }
+
+    // ---- Interaction ----
+    this.interaction.update(this.player.x, this.player.y, this.camera);
     if (this.controls.consumeInteract()) {
       const nearest = this.interaction.nearest;
       if (nearest) {
@@ -403,11 +364,55 @@ export class WorldScene extends Phaser.Scene {
       this.pendingBuilding = null;
     }
 
+    // ---- Life ----
     for (const npc of this.npcs) {
       npc.tick(delta, this.player.x, this.player.y);
     }
-    this.dayNight.update(time);
+    this.weather.update(
+      time,
+      delta,
+      state,
+      this.view,
+      layout.canvasWidth,
+      layout.canvasHeight,
+      camera.scrollX,
+      camera.scrollY,
+    );
+    for (const source of this.parts.sparks) {
+      source.timer -= delta;
+      if (source.timer <= 0) {
+        source.timer = 1200 + Math.random() * 1600;
+        source.emitter.explode(5 + Math.floor(Math.random() * 4));
+        if (source.light) this.lighting.pulse(source.light, 0.9);
+      }
+    }
 
+    // ---- Post-processing inputs ----
+    const post = this.postSettings;
+    post.time = this.uniforms.time;
+    post.scrollX = camera.scrollX;
+    post.scrollY = camera.scrollY;
+    post.daylight = state.daylight;
+    post.bloomStrength = POST.bloomStrength * state.bloom;
+    post.vignette = POST.vignetteStrength * state.vignette;
+    post.gradeStrength = state.gradeStrength;
+    post.saturation = state.saturation;
+    post.contrast = state.contrast;
+    post.brightness = state.brightness;
+    post.gradeTint[0] = state.gradeTint[0] ?? 1;
+    post.gradeTint[1] = state.gradeTint[1] ?? 1;
+    post.gradeTint[2] = state.gradeTint[2] ?? 1;
+    // Reflections pick up the sky colour by day and the ambient light by night.
+    for (let c = 0; c < 3; c += 1) {
+      post.skyTint[c] = (SKY[c] ?? 1) * 0.35 + (this.ambient[c] ?? 1) * 0.75;
+      post.sparkColor[c] = FOAM[c] ?? 1;
+    }
+    post.puddles = QUALITY_FEATURES[this.level].reflections
+      ? this.weather.wetness * WATER.puddleShine * 2.5
+      : 0;
+    this.retroSettings.time = post.time;
+
+    // ---- HUD feeds ----
     this.locationTimer += delta;
     if (this.locationTimer >= LOCATION_CHECK_MS) {
       this.locationTimer = 0;
@@ -420,34 +425,138 @@ export class WorldScene extends Phaser.Scene {
       this.position.y = this.player.bodyCenterY / TILE_SIZE;
       bridge.emit("position", this.position);
     }
-    this.watchFrameRate(delta);
+    // Frame-rate checks use the raw frame time: Phaser's smoothed delta spreads a single
+    // stall (tab switch, dialog) across the following frames and would read as slowness.
+    const rawDelta = this.game.loop.rawDelta;
+    if (document.visibilityState === "visible") {
+      this.quality.sample(rawDelta);
+    }
+    this.watchFrameRate(rawDelta);
   }
 
   private resetState(): void {
-    this.buildings.length = 0;
     this.npcs.length = 0;
-    this.areas.length = 0;
     this.waterTiles.length = 0;
     this.pendingBuilding = null;
     this.hasMoved = false;
     this.locationName = "";
+    this.phase = null;
     this.elapsed = 0;
     this.fpsReported = false;
     this.fpsLowStreak = 0;
+    this.waterTexture = null;
   }
 
-  private layout(): void {
+  /** Switches every visual system to the features of a quality level. */
+  private applyQuality(level: QualityLevel): void {
+    this.level = level;
+    const features = QUALITY_FEATURES[level];
+    this.lighting.setLightingEnabled(features.lighting);
+    this.shadows.setMode(features.shadows);
+    this.weather.setEnabled(features.weather);
+    this.postSettings.water = features.water;
+    this.postSettings.reflections = features.reflections ? WATER.reflectionStrength : 0;
+    for (const glow of this.parts.glows) {
+      glow.setVisible(!features.lighting);
+    }
+    this.applyPostPipelines();
+  }
+
+  /**
+   * Keeps the camera's post chain in sync: village effects, then the optional retro filter.
+   * The chain is only rebuilt when it changes (rebuilding recompiles its shaders).
+   */
+  private applyPostPipelines(): void {
     const camera = this.cameras.main;
-    const { width, height } = this.scale.gameSize;
-    const view = computeViewport(
-      width,
-      height,
-      this.physics.world.bounds.width,
-      this.physics.world.bounds.height,
-    );
-    camera.setViewport(view.x, view.y, view.width, view.height);
-    camera.setZoom(view.zoom);
-    this.interaction.setZoom(view.zoom);
+    const features = QUALITY_FEATURES[this.level];
+    const wanted: string[] = [];
+    if (features.postFx) {
+      wanted.push(POST_FX.village);
+      if (this.retroEnabled) wanted.push(POST_FX.retro);
+    }
+    const current = camera.postPipelines.map((pipeline) => pipeline.name);
+    if (current.length !== wanted.length || current.some((name, i) => name !== wanted[i])) {
+      camera.resetPostPipeline();
+      for (const name of wanted) {
+        camera.setPostPipeline(name);
+      }
+    }
+    for (const pipeline of camera.postPipelines) {
+      if (pipeline instanceof VillagePostFX) {
+        pipeline.settings = this.postSettings;
+        pipeline.mask = this.waterTexture
+          ? {
+              texture: this.waterTexture,
+              width: this.parts.worldWidth,
+              height: this.parts.worldHeight,
+            }
+          : null;
+      } else if (pipeline instanceof RetroPostFX) {
+        pipeline.settings = this.retroSettings;
+      }
+    }
+  }
+
+  /**
+   * Work that would otherwise delay the first frame: bake sun shadows, build the water mask
+   * and generate (or fetch) normal maps, then switch lit objects over to their normal maps.
+   */
+  private async runDeferredWork(json: TiledMap): Promise<void> {
+    await yieldToBrowser();
+    if (!this.alive) return;
+    this.shadows.bake();
+    this.shadows.update(this.cycle.state);
+
+    await yieldToBrowser();
+    if (!this.alive) return;
+    const maskTexture = this.textures.addCanvas(KEYS.waterMask, waterMaskCanvas(json));
+    this.waterTexture = maskTexture?.source[0]?.glTexture?.webGLTexture ?? null;
+    this.applyPostPipelines();
+
+    const generated =
+      (this.registry.get(GENERATED_GROUPS_KEY) as Set<TextureGroup> | undefined) ?? new Set();
+    const toLoad: { group: TextureGroup; url: string }[] = [];
+    for (const group of TEXTURE_GROUPS) {
+      await yieldToBrowser();
+      if (!this.alive) return;
+      if (generated.has(group)) {
+        generateNormalMap(this, group);
+      } else {
+        const url = normalMapUrl(group);
+        if (url) toLoad.push({ group, url });
+      }
+    }
+    this.lighting.refreshPipelines();
+    if (toLoad.length > 0) {
+      this.loadNormalMaps(toLoad);
+    }
+  }
+
+  /** Fetches hand-made normal maps for swapped-in art. Missing files leave the art unlit. */
+  private loadNormalMaps(entries: readonly { group: TextureGroup; url: string }[]): void {
+    for (const { group, url } of entries) {
+      this.load.image(`${KEYS[group]}-normal`, url);
+    }
+    this.load.on(Phaser.Loader.Events.FILE_LOAD_ERROR, (file: Phaser.Loader.File) => {
+      console.warn(`Normal map "${String(file.url)}" is missing; that art will render unlit.`);
+    });
+    this.load.once(Phaser.Loader.Events.COMPLETE, () => {
+      if (!this.alive) return;
+      for (const { group } of entries) {
+        const key = `${KEYS[group]}-normal`;
+        if (!this.textures.exists(key)) continue;
+        const image = this.textures.get(key).getSourceImage();
+        if (image instanceof HTMLImageElement || image instanceof HTMLCanvasElement) {
+          attachNormalMap(this.textures.get(KEYS[group]), image);
+        }
+      }
+      this.lighting.refreshPipelines();
+    });
+    this.load.start();
+  }
+
+  private onResize(): void {
+    this.camera.relayout();
   }
 
   private openBuilding(building: Building): void {
@@ -475,20 +584,16 @@ export class WorldScene extends Phaser.Scene {
     }
   }
 
-  private handlePointer(pointer: Phaser.Input.Pointer): void {
-    const camera = this.cameras.main;
-    if (
-      this.controls.isPaused ||
-      pointer.x < camera.x ||
-      pointer.y < camera.y ||
-      pointer.x > camera.x + camera.width ||
-      pointer.y > camera.y + camera.height
-    ) {
+  private handlePointer(): void {
+    if (this.controls.isPaused) {
       return;
     }
-    camera.getWorldPoint(pointer.x, pointer.y, this.pointerWorld);
-    const { x, y } = this.pointerWorld;
-    for (const building of this.buildings) {
+    const { viewport } = this.services;
+    viewport.clientToCanvas(viewport.pointer.x, viewport.pointer.y, this.canvasPoint);
+    const camera = this.cameras.main;
+    const x = camera.scrollX + this.canvasPoint.x;
+    const y = camera.scrollY + this.canvasPoint.y;
+    for (const building of this.parts.buildings) {
       if (building.hitTest(x, y)) {
         this.goToBuilding(building);
         return;
@@ -537,12 +642,13 @@ export class WorldScene extends Phaser.Scene {
     }
     if (!puff.getData("pooled")) {
       puff.setData("pooled", true);
+      this.lighting.register(puff, puff.texture);
       puff.on(Phaser.Animations.Events.ANIMATION_COMPLETE, () => this.dust.killAndHide(puff));
     }
     puff
       .setActive(true)
       .setVisible(true)
-      .setDepth(DEPTH.shadow)
+      .setDepth(DEPTH.shadow + 1)
       .setPosition(x, y - 1);
     puff.play(ANIMS.dust);
   }
@@ -562,7 +668,7 @@ export class WorldScene extends Phaser.Scene {
     const x = this.player.x;
     const y = this.player.bodyCenterY;
     let name = DEFAULT_AREA_NAME;
-    for (const area of this.areas) {
+    for (const area of this.parts.areas) {
       if (area.rect.contains(x, y)) {
         name = area.name;
         break;
@@ -575,7 +681,11 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private watchFrameRate(delta: number): void {
-    if (this.fpsReported || this.elapsed < 5000) {
+    if (this.fpsReported || this.elapsed < 6000) {
+      return;
+    }
+    if (delta > QUALITY.auto.stallMs) {
+      this.fpsLowStreak = 0;
       return;
     }
     this.fpsTimer += delta;
@@ -583,12 +693,17 @@ export class WorldScene extends Phaser.Scene {
       return;
     }
     this.fpsTimer = 0;
-    // Ignore background-tab throttling; only count visible, focused slowness.
-    if (document.visibilityState !== "visible") {
+    // Ignore background-tab throttling; only count visible slowness, and only once the
+    // automatic quality setting has had its chance to step down.
+    if (
+      document.visibilityState !== "visible" ||
+      (this.quality.currentSetting === "auto" && this.level !== "low")
+    ) {
       this.fpsLowStreak = 0;
       return;
     }
-    this.fpsLowStreak = this.game.loop.actualFps < 24 ? this.fpsLowStreak + 1 : 0;
+    this.fpsLowStreak =
+      this.game.loop.actualFps < QUALITY.plainOfferFps ? this.fpsLowStreak + 1 : 0;
     if (this.fpsLowStreak >= 4) {
       this.fpsReported = true;
       this.services.bridge.emit("lowFps", null);
@@ -596,11 +711,21 @@ export class WorldScene extends Phaser.Scene {
   }
 
   private teardown(): void {
+    this.alive = false;
     this.unsubscribe.forEach((off) => off());
     this.unsubscribe.length = 0;
-    this.scale.off(Phaser.Scale.Events.RESIZE, this.layout, this);
+    this.scale.off(Phaser.Scale.Events.RESIZE, this.onResize, this);
     this.input.off(Phaser.Input.Events.POINTER_DOWN, this.handlePointer, this);
-    this.interaction?.destroy();
-    this.dayNight?.destroy();
+    this.cameras.main?.resetPostPipeline();
+    attachWorldUniforms(this.game, null);
+    this.weather?.destroy();
+    this.shadows?.destroy();
+    this.lighting?.destroy();
+    if (this.textures.exists(KEYS.waterMask)) {
+      this.textures.remove(KEYS.waterMask);
+    }
+    if (this.textures.exists(KEYS.shadows)) {
+      this.textures.remove(KEYS.shadows);
+    }
   }
 }

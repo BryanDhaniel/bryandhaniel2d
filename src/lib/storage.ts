@@ -2,7 +2,10 @@
 
 export const STORAGE_KEYS = {
   muted: "kiz-village:muted",
-  night: "kiz-village:night",
+  timeMode: "kiz-village:time-mode",
+  weather: "kiz-village:weather",
+  quality: "kiz-village:quality",
+  retro: "kiz-village:retro",
   playAnyway: "kiz-village:play-anyway",
   fallbackReason: "kiz-village:fallback-reason",
 } as const;

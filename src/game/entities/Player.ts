@@ -24,7 +24,6 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   declare body: Phaser.Physics.Arcade.Body;
   facing: Facing = "down";
   private moving = false;
-  private readonly shadow: Phaser.GameObjects.Image;
 
   constructor(
     scene: Phaser.Scene,
@@ -39,11 +38,6 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     this.body.setSize(PLAYER.body.width, PLAYER.body.height);
     this.body.setOffset(PLAYER.body.offsetX, PLAYER.body.offsetY);
     this.setCollideWorldBounds(true);
-    this.shadow = scene.add
-      .image(x, y, KEYS.props, "shadow")
-      .setOrigin(0.5, 0.5)
-      .setAlpha(0.3)
-      .setDepth(DEPTH.shadow);
     this.play(ANIMS.idle("player", "down"));
     this.on(Phaser.Animations.Events.ANIMATION_UPDATE, this.handleFrame, this);
   }
@@ -96,12 +90,10 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
 
   syncDepth(): void {
     this.setDepth(DEPTH.entity + this.y);
-    this.shadow.setPosition(this.x, this.y - 1);
   }
 
   override destroy(fromScene?: boolean): void {
     this.off(Phaser.Animations.Events.ANIMATION_UPDATE, this.handleFrame, this);
-    this.shadow.destroy();
     super.destroy(fromScene);
   }
 

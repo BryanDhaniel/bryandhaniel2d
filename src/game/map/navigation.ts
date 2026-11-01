@@ -1,9 +1,9 @@
 import { MINIMAP_TERRAIN } from "@/game/bridge";
 import {
-  FIRST_GID,
   LAYER,
   OBJECT_TYPE,
-  TILESET,
+  isForestGid,
+  isPavedGid,
   isWaterGid,
   type TiledMap,
   type TiledObject,
@@ -66,17 +66,10 @@ const BLOCKING_OBJECTS: ReadonlySet<string> = new Set([
   OBJECT_TYPE.fountain,
   OBJECT_TYPE.tree,
   OBJECT_TYPE.lamp,
+  OBJECT_TYPE.stall,
+  OBJECT_TYPE.bench,
+  OBJECT_TYPE.well,
 ]);
-
-function isPathGid(gid: number): boolean {
-  const index = gid - FIRST_GID;
-  return index >= TILESET.path && index < TILESET.path + 16;
-}
-
-function isForestGid(gid: number): boolean {
-  const index = gid - FIRST_GID;
-  return index >= TILESET.forest && index < TILESET.forest + 16;
-}
 
 /** Derives the walkable grid and mini-map terrain from a Tiled map (generated or imported). */
 export function buildNavigation(map: TiledMap): Navigation {
@@ -93,7 +86,7 @@ export function buildNavigation(map: TiledMap): Navigation {
     if (isWaterGid(groundGid)) {
       walkable[i] = 0;
       terrain[i] = MINIMAP_TERRAIN.water;
-    } else if (isPathGid(groundGid)) {
+    } else if (isPavedGid(groundGid)) {
       terrain[i] = MINIMAP_TERRAIN.path;
     }
     if (obstacleGid !== 0) {

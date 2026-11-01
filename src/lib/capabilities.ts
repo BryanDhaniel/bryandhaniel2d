@@ -46,10 +46,13 @@ function detect(): Capabilities {
 
 let cached: Capabilities | null = null;
 
-function snapshot(): Capabilities {
+/** Detected once and cached; safe to call from effects and event handlers. */
+export function getCapabilities(): Capabilities {
   cached ??= detect();
   return cached;
 }
+
+const snapshot = getCapabilities;
 
 const subscribe = () => () => {};
 

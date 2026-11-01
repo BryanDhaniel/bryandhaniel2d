@@ -1,4 +1,11 @@
 import type { SectionId } from "@/content/portfolio";
+import type {
+  DayPhase,
+  QualityLevel,
+  QualitySetting,
+  TimeMode,
+  WeatherKind,
+} from "./settings/types";
 
 /**
  * A tiny typed event channel between React (overlays, HUD) and Phaser (the world).
@@ -108,6 +115,12 @@ export interface PlayerPosition {
   y: number;
 }
 
+export interface ScreenPoint {
+  /** CSS pixels inside the game container. The same object is reused between events. */
+  x: number;
+  y: number;
+}
+
 export interface GameToUiEvents {
   progress: { value: number; label: string };
   ready: MapInfo;
@@ -116,13 +129,21 @@ export interface GameToUiEvents {
   location: { name: string };
   moved: null;
   position: PlayerPosition;
+  /** The "E / Tap" bubble: shown above the building the player is standing at. */
+  prompt: { visible: boolean };
+  promptPosition: ScreenPoint;
+  clock: { phase: DayPhase };
+  qualityLevel: { level: QualityLevel; setting: QualitySetting };
   lowFps: null;
   fatal: { reason: "webgl" | "assets" | "runtime"; message: string };
 }
 
 export interface UiToGameEvents {
   pause: { paused: boolean };
-  night: { enabled: boolean };
+  setTimeMode: { mode: TimeMode };
+  setWeather: { kind: WeatherKind };
+  setQuality: { setting: QualitySetting };
+  setRetro: { enabled: boolean };
   dpad: { x: number; y: number };
   interact: null;
   travel: { sectionId: SectionId };

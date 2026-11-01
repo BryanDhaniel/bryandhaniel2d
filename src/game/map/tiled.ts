@@ -2,11 +2,13 @@ import { hash2 } from "@/game/art/pixels";
 import {
   AREAS,
   BUILDINGS,
+  PROP_TILES,
   TILE_SIZE,
   parseVillage,
   type Ground,
   type Obstacle,
   type ParsedVillage,
+  type PropKind,
 } from "./village";
 
 /**
@@ -17,18 +19,21 @@ import {
 export const TILESET = {
   name: "village-tiles",
   columns: 16,
-  rows: 7,
+  rows: 9,
   grass: 0,
   grassVariants: 4,
   flowers: 4,
   flowerVariants: 4,
   bush: 8,
   rock: 9,
+  planter: 10,
   path: 16,
   water: 32,
   waterFrames: 3,
   fence: 80,
   forest: 96,
+  cobble: 112,
+  bridge: 128,
 } as const;
 
 export const MASK = { N: 1, E: 2, S: 4, W: 8 } as const;
@@ -43,6 +48,24 @@ export function gid(tileIndex: number): number {
 export function isWaterGid(value: number): boolean {
   const index = value - FIRST_GID;
   return index >= TILESET.water && index < TILESET.water + TILESET.waterFrames * 16;
+}
+
+function inAutotile(value: number, start: number): boolean {
+  const index = value - FIRST_GID;
+  return index >= start && index < start + 16;
+}
+
+/** Dirt paths, cobblestones and the bridge: everything that reads as "paved" on the mini-map. */
+export function isPavedGid(value: number): boolean {
+  return (
+    inAutotile(value, TILESET.path) ||
+    inAutotile(value, TILESET.cobble) ||
+    inAutotile(value, TILESET.bridge)
+  );
+}
+
+export function isForestGid(value: number): boolean {
+  return inAutotile(value, TILESET.forest);
 }
 
 // ---- Minimal Tiled JSON types (the subset Phaser's Tiled parser reads) ----
@@ -136,9 +159,20 @@ export const OBJECT_TYPE = {
   fountain: "fountain",
   tree: "tree",
   lamp: "lamp",
+  stall: "stall",
+  bench: "bench",
+  well: "well",
   spawn: "spawn",
   area: "area",
 } as const;
+
+const PROP_OBJECT_TYPE: Record<PropKind, string> = {
+  tree: OBJECT_TYPE.tree,
+  lamp: OBJECT_TYPE.lamp,
+  stall: OBJECT_TYPE.stall,
+  bench: OBJECT_TYPE.bench,
+  well: OBJECT_TYPE.well,
+};
 
 // ---- Builder ----
 
@@ -163,15 +197,23 @@ function neighbourMask(
   return mask;
 }
 
+const PAVED: ReadonlySet<Ground> = new Set<Ground>(["path", "cobble", "bridge"]);
+
 function groundTile(village: ParsedVillage, kind: Ground, x: number, y: number): number {
   const is = (target: Ground) => (index: number) => village.ground[index] === target;
+  const paved = (index: number) => PAVED.has(village.ground[index] ?? "grass");
   switch (kind) {
     case "grass":
       return TILESET.grass + Math.floor(hash2(x, y, 7) * TILESET.grassVariants);
     case "flowers":
       return TILESET.flowers + Math.floor(hash2(x, y, 11) * TILESET.flowerVariants);
     case "path":
-      return TILESET.path + neighbourMask(village, x, y, is("path"), true);
+      // Dirt runs straight into cobbles and the bridge without a grass verge.
+      return TILESET.path + neighbourMask(village, x, y, paved, true);
+    case "cobble":
+      return TILESET.cobble + neighbourMask(village, x, y, is("cobble"), true);
+    case "bridge":
+      return TILESET.bridge + neighbourMask(village, x, y, is("bridge"), false);
     case "water":
       return TILESET.water + neighbourMask(village, x, y, is("water"), true);
   }
@@ -188,6 +230,8 @@ function obstacleTile(village: ParsedVillage, kind: Obstacle, x: number, y: numb
       return TILESET.bush;
     case "rock":
       return TILESET.rock;
+    case "planter":
+      return TILESET.planter;
   }
 }
 
@@ -248,13 +292,15 @@ export function buildTiledMap(village: ParsedVillage = parseVillage()): TiledMap
   }
 
   for (const item of village.props) {
+    const size = PROP_TILES[item.kind];
     add({
-      name: item.kind,
-      type: item.kind === "tree" ? OBJECT_TYPE.tree : OBJECT_TYPE.lamp,
+      name: item.variant ?? item.kind,
+      type: PROP_OBJECT_TYPE[item.kind],
       x: item.x * TILE_SIZE,
       y: item.y * TILE_SIZE,
-      width: TILE_SIZE,
-      height: TILE_SIZE,
+      width: size.width * TILE_SIZE,
+      height: size.height * TILE_SIZE,
+      properties: item.variant ? [prop("variant", "string", item.variant)] : undefined,
     });
   }
 

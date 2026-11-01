@@ -26,7 +26,6 @@ export class Npc extends Phaser.Physics.Arcade.Sprite {
   private facing: Facing = "down";
   private readonly follower: PathFollower;
   private readonly steerOut: Steer = { x: 0, y: 0 };
-  private readonly shadow: Phaser.GameObjects.Image;
   private readonly emote: Phaser.GameObjects.Image;
   private emoteTimer = 0;
   private noticed = false;
@@ -66,11 +65,6 @@ export class Npc extends Phaser.Physics.Arcade.Sprite {
     this.timer = 800 + Math.random() * 2200;
     this.lastX = x;
     this.lastY = y;
-    this.shadow = scene.add
-      .image(x, y, KEYS.props, "shadow")
-      .setAlpha(0.25)
-      .setDepth(DEPTH.shadow)
-      .setScale(kind === "cat" ? 0.8 : 1, 1);
     this.emote = scene.add
       .image(x, y, KEYS.props, "heart")
       .setOrigin(0.5, 1)
@@ -119,7 +113,6 @@ export class Npc extends Phaser.Physics.Arcade.Sprite {
       }
     }
     this.setDepth(DEPTH.entity + this.y);
-    this.shadow.setPosition(this.x, this.y - 1);
     if (this.emote.visible) {
       const bob = this.mode === "sleep" ? Math.sin(this.scene.time.now / 400) * 1.5 : 0;
       this.emote.setPosition(
@@ -130,7 +123,6 @@ export class Npc extends Phaser.Physics.Arcade.Sprite {
   }
 
   override destroy(fromScene?: boolean): void {
-    this.shadow.destroy();
     this.emote.destroy();
     super.destroy(fromScene);
   }

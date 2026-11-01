@@ -1,8 +1,17 @@
 import * as Phaser from "phaser";
-import { ASSET_SOURCES, ATLAS_GROUPS, KEYS, type AtlasGroup } from "@/game/assets/manifest";
+import {
+  ASSET_SOURCES,
+  ATLAS_GROUPS,
+  KEYS,
+  STRIP_GROUPS,
+  type AtlasGroup,
+  type StripGroup,
+  type TextureGroup,
+} from "@/game/assets/manifest";
 import {
   createAnimations,
   generateAtlas,
+  generateStrip,
   generateTileset,
   missingFrames,
 } from "@/game/assets/textures";
@@ -11,11 +20,16 @@ import { isTiledMap } from "@/game/map/navigation";
 import { buildTiledMap } from "@/game/map/tiled";
 import { getServices } from "@/game/services";
 
-const GROUP_LABELS: Record<AtlasGroup, string> = {
+const GROUP_LABELS: Record<AtlasGroup | StripGroup, string> = {
   characters: "Sketching the villagers",
   buildings: "Raising the buildings",
-  props: "Planting the trees",
+  props: "Setting up the market",
+  trees: "Planting the trees",
+  tufts: "Growing the grass",
 };
+
+/** Registry key for the set of texture groups that were generated rather than loaded. */
+export const GENERATED_GROUPS_KEY = "generatedGroups";
 
 /**
  * Yields to the browser between generation steps so the progress bar can paint. Uses a
@@ -33,25 +47,10 @@ function yieldToBrowser(): Promise<void> {
   });
 }
 
-function withTimeout(promise: Promise<unknown>, ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = window.setTimeout(resolve, ms);
-    promise.then(
-      () => {
-        window.clearTimeout(timer);
-        resolve();
-      },
-      () => {
-        window.clearTimeout(timer);
-        resolve();
-      },
-    );
-  });
-}
-
 /**
- * Loads any swapped-in art from ASSET_SOURCES, then generates whatever is missing or
- * failed to load, reporting progress to the HTML loading screen as it goes.
+ * Loads any swapped-in art from ASSET_SOURCES, then generates whatever is missing or failed
+ * to load, reporting progress to the HTML loading screen as it goes. Normal maps and weather
+ * textures are deferred to the world scene, after the first frame.
  */
 export class PreloadScene extends Phaser.Scene {
   private readonly failed = new Set<string>();
@@ -83,9 +82,9 @@ export class PreloadScene extends Phaser.Scene {
       bridge.emit("progress", { value: 0.4 + value * 0.2, label: "Fetching art" });
     });
     if (ASSET_SOURCES.tiles) {
-      this.load.image(KEYS.tiles, ASSET_SOURCES.tiles);
+      this.load.image(KEYS.tiles, ASSET_SOURCES.tiles.image);
     }
-    for (const group of ATLAS_GROUPS) {
+    for (const group of [...ATLAS_GROUPS, ...STRIP_GROUPS]) {
       const source = ASSET_SOURCES[group];
       if (source) {
         this.load.atlas(KEYS[group], source.image, source.atlas);
@@ -114,36 +113,46 @@ export class PreloadScene extends Phaser.Scene {
   }
 
   private async prepare(): Promise<void> {
-    const { bridge, options } = getServices(this);
+    const { bridge } = getServices(this);
     const report = (value: number, label: string) => bridge.emit("progress", { value, label });
+    const generated = new Set<TextureGroup>();
 
     report(0.62, "Laying the paths");
     if (!this.usable(KEYS.tiles)) {
       generateTileset(this);
+      generated.add("tiles");
     }
     await yieldToBrowser();
 
+    const groups: readonly (AtlasGroup | StripGroup)[] = [...ATLAS_GROUPS, ...STRIP_GROUPS];
     let step = 0;
-    for (const group of ATLAS_GROUPS) {
+    for (const group of groups) {
       if (!this.alive) return;
-      report(0.66 + step * 0.08, GROUP_LABELS[group]);
+      report(0.65 + (step / groups.length) * 0.25, GROUP_LABELS[group]);
       step += 1;
-      if (this.usable(KEYS[group])) {
+      let generate = !this.usable(KEYS[group]);
+      if (!generate) {
         const missing = missingFrames(this, group);
         if (missing.length > 0) {
           console.warn(
-            `The ${group} atlas is missing ${missing.length} frames (e.g. "${missing[0]}"); using generated art.`,
+            `The ${group} texture is missing ${missing.length} frames (e.g. "${missing[0]}"); using generated art.`,
           );
+          generate = true;
+        }
+      }
+      if (generate) {
+        if (group === "trees" || group === "tufts") {
+          generateStrip(this, group);
+        } else {
           generateAtlas(this, group);
         }
-      } else {
-        generateAtlas(this, group);
+        generated.add(group);
       }
       await yieldToBrowser();
     }
 
     if (!this.alive) return;
-    report(0.9, "Drawing the map");
+    report(0.93, "Drawing the map");
     const cached: unknown = this.cache.tilemap.exists(KEYS.map)
       ? this.cache.tilemap.get(KEYS.map)
       : null;
@@ -158,11 +167,8 @@ export class PreloadScene extends Phaser.Scene {
       });
     }
     createAnimations(this);
+    this.registry.set(GENERATED_GROUPS_KEY, generated);
 
-    report(0.96, "Lighting the lamps");
-    if (typeof document !== "undefined" && "fonts" in document && options.fontFamily) {
-      await withTimeout(document.fonts.load(`16px ${options.fontFamily}`), 1500);
-    }
     if (!this.alive) return;
     report(1, "Welcome!");
     this.scene.start(SCENES.world);

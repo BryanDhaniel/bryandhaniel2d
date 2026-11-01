@@ -318,5 +318,3 @@ export const CAT_FRAMES: Record<"walk0" | "walk1" | "sit" | "sleep", PixelArt> =
     "kkkkkkkkkkkkkk..",
   ],
 };
-
-export const SHADOW: PixelArt = [".kkkkkkkk.", "kkkkkkkkkk", ".kkkkkkkk."];

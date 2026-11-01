@@ -1,64 +1,49 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
+import type { ComponentProps } from "react";
 import type { SectionId } from "@/content/portfolio";
 import type { GameBridge, MapInfo } from "@/game/bridge";
+import type { DayPhase } from "@/game/settings/types";
 import { PixelIcon } from "@/components/PixelIcon";
 import { MiniMap } from "./MiniMap";
+import { SettingsMenu } from "./SettingsMenu";
 import { SkipLink } from "./SkipLink";
 
 interface HudProps {
   bridge: GameBridge;
   mapInfo: MapInfo | null;
   location: string;
+  phase: DayPhase | null;
   near: { sectionId: SectionId; label: string } | null;
   nearTitle: string | null;
   touch: boolean;
   muted: boolean;
-  night: boolean;
   inert: boolean;
+  settings: ComponentProps<typeof SettingsMenu>;
   onToggleMute: () => void;
-  onToggleNight: () => void;
   onTravel: (sectionId: SectionId) => void;
 }
 
-function ToggleButton({
-  pressed,
-  label,
-  icon,
-  onClick,
-}: {
-  pressed: boolean;
-  label: string;
-  icon: Parameters<typeof PixelIcon>[0]["name"];
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={pressed}
-      aria-label={label}
-      title={label}
-      onClick={onClick}
-      className="pixel-button size-11 bg-cloud text-ink hover:bg-wheat aria-pressed:bg-wheat"
-    >
-      <PixelIcon name={icon} size={20} />
-    </button>
-  );
-}
+const PHASE_ICON: Record<DayPhase, "sun" | "moon"> = {
+  Dawn: "sun",
+  Day: "sun",
+  Dusk: "moon",
+  Night: "moon",
+};
 
 export function Hud({
   bridge,
   mapInfo,
   location,
+  phase,
   near,
   nearTitle,
   touch,
   muted,
-  night,
   inert,
+  settings,
   onToggleMute,
-  onToggleNight,
   onTravel,
 }: HudProps) {
   return (
@@ -76,6 +61,12 @@ export function Hud({
           >
             <PixelIcon name="pin" size={20} className="shrink-0" />
             <span className="truncate">{location}</span>
+            {phase ? (
+              <span className="ml-auto flex shrink-0 items-center gap-1 border-l-2 border-mist pl-2 text-xs text-slate">
+                <PixelIcon name={PHASE_ICON[phase]} size={10} />
+                {phase}
+              </span>
+            ) : null}
           </p>
           <AnimatePresence initial={false}>
             {near && nearTitle ? (
@@ -101,19 +92,18 @@ export function Hud({
           </div>
         ) : null}
       </div>
-      <div className="pointer-events-auto ml-auto flex shrink-0 items-start gap-2">
-        <ToggleButton
-          pressed={muted}
-          label={muted ? "Unmute sound effects" : "Mute sound effects"}
-          icon={muted ? "soundOff" : "soundOn"}
+      <div className="pointer-events-auto relative ml-auto flex shrink-0 items-start gap-2">
+        <button
+          type="button"
+          aria-pressed={muted}
+          aria-label={muted ? "Unmute sound effects" : "Mute sound effects"}
+          title={muted ? "Unmute sound effects" : "Mute sound effects"}
           onClick={onToggleMute}
-        />
-        <ToggleButton
-          pressed={night}
-          label={night ? "Switch to day" : "Switch to night"}
-          icon={night ? "moon" : "sun"}
-          onClick={onToggleNight}
-        />
+          className="pixel-button size-11 bg-cloud text-ink hover:bg-wheat aria-pressed:bg-wheat"
+        >
+          <PixelIcon name={muted ? "soundOff" : "soundOn"} size={20} />
+        </button>
+        <SettingsMenu {...settings} />
         <SkipLink compact />
       </div>
     </div>

@@ -8,31 +8,31 @@ import type { SectionId } from "@/content/portfolio";
 export const VILLAGE_ROWS: readonly string[] = [
   "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
   "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
-  "TTT........TTT.........TT........T...TTT",
-  "TT..HHHHH.fffff.t.......t......WWWWW..TT",
+  "TTT........TTT...p.....TT..h.....T...TTT",
+  "TT..HHHHH.fffff.t.......h......WWWWW..TT",
   "TT..HHHHH.f***f.............rr.WWWWW..TT",
   "TT..HHHHH.f***f...........t.r..WWWWW..TT",
   "TT..HHHHH.fffff................WWWWW..TT",
   "TT.##################################.TT",
   "TT.##################################.TT",
   "TT...........l.##########.l...........TT",
-  "TT...t..**.....##########.........t...TT",
-  "TT.........t...##########..t..........TT",
-  "TT..LLLLL......####FF####......AAAAA..TT",
-  "TT..LLLLL......####FF####......AAAAA..TT",
-  "TT..LLLLL......##########......AAAAA..TT",
-  "TT..LLLLL......###vP#####......AAAAA..TT",
-  "TT..LLLLL....l.##########.l....AAAAA..TT",
-  "TT.##################################.TT",
-  "TT.##################################.TT",
-  "TT.............##........c....**......TT",
-  "TT.............##IIIII..t.............TT",
-  "TT.~~~~~.......##IIIII.....~~~~~~~~...TT",
-  "TT.~~~~~~~.....##IIIII.....~~~~~~~~~..TT",
+  "TT...t.**.w....#SoooooSo#.........t...TT",
+  "TTb........t...#oooooooo#..p..........TT",
+  "TT..LLLLL..rr..#oooFFooo#......AAAAA..TT",
+  "TT..LLLLL..~~..#oooFFooo#......AAAAA..TT",
+  "TT..LLLLL..~~..#onoooono#......AAAAAb.TT",
+  "TT..LLLLL..~~..#oovPoooo#......AAAAA..TT",
+  "TT.qLLLLLq.~~l.##########.l...qAAAAAq.TT",
+  "TT.########==########################.TT",
+  "TT.########==########################.TT",
+  "TT.........~~..##........c....**......TT",
+  "TT.........~~..##IIIIIq.t.............TT",
+  "TT.~~~~~~~~~~..##IIIII.....~~~~~~~~...TT",
+  "TT.~~~~~~~~....##IIIII.....~~~~~~~~~..TT",
   "TT.~~~~~~~~...l##IIIIIm....~~~~~~~~~~.TT",
   "TT.~~~~~~~.....##########..~~~~~~~~~~.TT",
-  "TT..~~~~~......##########...~~~~~~~~..TT",
-  "TT....~~....t.......k.......~~~~~~....TT",
+  "TT..~~~~~..r...##########...~~~~~~~~..TT",
+  "TT....~~....h.......k.......~~~~~~.p..TT",
   "TTT.......TT................TT.......TTT",
   "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
   "TTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTTT",
@@ -40,9 +40,10 @@ export const VILLAGE_ROWS: readonly string[] = [
 
 export const TILE_SIZE = 16;
 
-export type Ground = "grass" | "flowers" | "path" | "water";
-export type Obstacle = "forest" | "fence" | "bush" | "rock";
-export type PropKind = "tree" | "lamp";
+export type Ground = "grass" | "flowers" | "path" | "cobble" | "bridge" | "water";
+export type Obstacle = "forest" | "fence" | "bush" | "rock" | "planter";
+export type PropKind = "tree" | "lamp" | "stall" | "bench" | "well";
+export type TreeVariant = "oak" | "pine" | "birch";
 export type NpcKind = "cat" | "villager" | "elder";
 export type BuildingId = "home" | "workshop" | "library" | "ailab" | "inn" | "mailbox";
 
@@ -50,6 +51,7 @@ interface LegendEntry {
   ground: Ground;
   obstacle?: Obstacle;
   prop?: PropKind;
+  variant?: TreeVariant;
   building?: BuildingId;
   fountain?: true;
   spawn?: "player" | NpcKind;
@@ -59,24 +61,41 @@ export const LEGEND: Readonly<Record<string, LegendEntry>> = {
   ".": { ground: "grass" },
   "*": { ground: "flowers" },
   "#": { ground: "path" },
+  o: { ground: "cobble" },
+  "=": { ground: "bridge" },
   "~": { ground: "water" },
   T: { ground: "grass", obstacle: "forest" },
   f: { ground: "grass", obstacle: "fence" },
   b: { ground: "grass", obstacle: "bush" },
   r: { ground: "grass", obstacle: "rock" },
-  t: { ground: "grass", prop: "tree" },
+  q: { ground: "grass", obstacle: "planter" },
+  t: { ground: "grass", prop: "tree", variant: "oak" },
+  p: { ground: "grass", prop: "tree", variant: "pine" },
+  h: { ground: "grass", prop: "tree", variant: "birch" },
   l: { ground: "grass", prop: "lamp" },
+  w: { ground: "grass", prop: "well" },
+  S: { ground: "cobble", prop: "stall" },
+  n: { ground: "cobble", prop: "bench" },
   H: { ground: "grass", building: "home" },
   W: { ground: "grass", building: "workshop" },
   L: { ground: "grass", building: "library" },
   A: { ground: "grass", building: "ailab" },
   I: { ground: "grass", building: "inn" },
   m: { ground: "grass", building: "mailbox" },
-  F: { ground: "path", fountain: true },
-  P: { ground: "path", spawn: "player" },
-  v: { ground: "path", spawn: "villager" },
+  F: { ground: "cobble", fountain: true },
+  P: { ground: "cobble", spawn: "player" },
+  v: { ground: "cobble", spawn: "villager" },
   k: { ground: "grass", spawn: "elder" },
   c: { ground: "grass", spawn: "cat" },
+};
+
+/** Footprint of each prop in tiles (props are anchored at their top-left tile). */
+export const PROP_TILES: Readonly<Record<PropKind, { width: number; height: number }>> = {
+  tree: { width: 1, height: 1 },
+  lamp: { width: 1, height: 1 },
+  stall: { width: 2, height: 1 },
+  bench: { width: 1, height: 1 },
+  well: { width: 1, height: 1 },
 };
 
 export interface BuildingInfo {
@@ -101,8 +120,12 @@ export interface TileRect {
   height: number;
 }
 
-/** Named regions for the HUD location label (tile coordinates, inclusive start, exclusive end). */
+/**
+ * Named regions for the HUD location label (tile coordinates). The first match wins, so
+ * small areas are listed before the roads they sit on.
+ */
 export const AREAS: readonly { name: string; rect: TileRect }[] = [
+  { name: "Old Bridge", rect: { x: 10, y: 16, width: 4, height: 4 } },
   { name: "Village Square", rect: { x: 15, y: 9, width: 10, height: 8 } },
   { name: "Garden", rect: { x: 9, y: 2, width: 7, height: 5 } },
   { name: "North Road", rect: { x: 2, y: 7, width: 36, height: 2 } },
@@ -120,6 +143,13 @@ export interface ParsedBuilding {
   door: { x: number; y: number };
 }
 
+export interface ParsedProp {
+  kind: PropKind;
+  x: number;
+  y: number;
+  variant?: TreeVariant;
+}
+
 export interface ParsedVillage {
   width: number;
   height: number;
@@ -127,7 +157,7 @@ export interface ParsedVillage {
   obstacles: (Obstacle | null)[];
   buildings: ParsedBuilding[];
   fountain: TileRect | null;
-  props: { kind: PropKind; x: number; y: number }[];
+  props: ParsedProp[];
   spawns: { kind: "player" | NpcKind; x: number; y: number }[];
 }
 
@@ -156,7 +186,7 @@ export function parseVillage(rows: readonly string[] = VILLAGE_ROWS): ParsedVill
 
   const ground: Ground[] = [];
   const obstacles: (Obstacle | null)[] = [];
-  const props: ParsedVillage["props"] = [];
+  const props: ParsedProp[] = [];
   const spawns: ParsedVillage["spawns"] = [];
   const buildingCells = new Map<BuildingId, { x: number; y: number }[]>();
   const fountainCells: { x: number; y: number }[] = [];
@@ -170,7 +200,11 @@ export function parseVillage(rows: readonly string[] = VILLAGE_ROWS): ParsedVill
       ground.push(entry.ground);
       obstacles.push(entry.obstacle ?? null);
       if (entry.prop) {
-        props.push({ kind: entry.prop, x, y });
+        props.push(
+          entry.variant
+            ? { kind: entry.prop, x, y, variant: entry.variant }
+            : { kind: entry.prop, x, y },
+        );
       }
       if (entry.spawn) {
         spawns.push({ kind: entry.spawn, x, y });

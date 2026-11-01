@@ -241,7 +241,93 @@ function paintRock(p: Painter): void {
   });
 }
 
-/** Paints the whole tileset (layout defined by TILESET) onto a 256x112 canvas. */
+/** Cobblestones in staggered courses; open sides dither into the dirt they meet. */
+function paintCobble(p: Painter, mask: number): void {
+  p.rect(0, 0, T, T, "slate");
+  for (let row = 0; row < 4; row += 1) {
+    const y = row * 4;
+    const offset = row % 2 === 0 ? 0 : 2;
+    for (let i = -1; i < 4; i += 1) {
+      const x = i * 4 + offset;
+      // Stones that straddle the tile edge use the same tone on both sides of the seam.
+      const tone = hash2((i + 4) % 4, row, 91);
+      const face: PaletteName = tone > 0.8 ? "stone" : tone < 0.12 ? "wheat" : "mist";
+      p.rect(x, y, 3, 3, face);
+      p.px(x, y, face === "stone" ? "mist" : "cloud");
+      p.px(x + 2, y + 2, "stone");
+    }
+  }
+  const open = (bit: number) => !(mask & bit);
+  for (let i = 0; i < T; i += 1) {
+    for (let d = 0; d < 3; d += 1) {
+      // Ordered dither: dense on the outermost row, sparse further in.
+      const keep = d === 0 ? (i + d) % 4 !== 0 : d === 1 ? (i + d) % 2 === 0 : (i + d) % 4 === 0;
+      if (!keep) continue;
+      if (open(MASK.N)) p.px(i, d, d === 0 ? "sand" : "wood");
+      if (open(MASK.S)) p.px(i, T - 1 - d, d === 0 ? "sand" : "wood");
+      if (open(MASK.W)) p.px(d, i, d === 0 ? "sand" : "wood");
+      if (open(MASK.E)) p.px(T - 1 - d, i, d === 0 ? "sand" : "wood");
+    }
+  }
+}
+
+/** Wooden deck over the creek: boards run across, rails along open north/south edges. */
+function paintBridge(p: Painter, mask: number): void {
+  p.rect(0, 0, T, T, "wood");
+  for (let x = 0; x < T; x += 4) {
+    p.vline(x + 3, 0, T, "bark");
+    p.vline(x, 0, T, "sand");
+    if (hash2(x, mask, 95) > 0.5) p.px(x + 1, Math.floor(hash2(x, 3, 96) * T), "bark");
+  }
+  const open = (bit: number) => !(mask & bit);
+  if (open(MASK.N)) {
+    p.hline(0, 0, T, "ink");
+    p.hline(0, 1, T, "sand");
+    p.hline(0, 2, T, "bark");
+    p.hline(0, 3, T, "ink");
+  }
+  if (open(MASK.S)) {
+    p.hline(0, T - 4, T, "ink");
+    p.hline(0, T - 3, T, "sand");
+    p.hline(0, T - 2, T, "bark");
+    p.hline(0, T - 1, T, "ink");
+  }
+  // Posts where the deck meets the bank.
+  for (const [bit, x] of [
+    [MASK.W, 0],
+    [MASK.E, T - 3],
+  ] as const) {
+    if (!open(bit)) continue;
+    if (open(MASK.N)) p.box(x, 0, 3, 6, "bark", "ink");
+    if (open(MASK.S)) p.box(x, T - 6, 3, 6, "bark", "ink");
+  }
+}
+
+/** A wooden flower box; sits on the obstacle layer so the grass shows around it. */
+function paintPlanter(p: Painter): void {
+  p.hline(2, 15, 13, "forest");
+  p.box(1, 8, 14, 7, "wood", "ink");
+  p.hline(2, 9, 12, "bark");
+  p.hline(2, 13, 12, "sand");
+  const blooms: readonly [number, number, PaletteName][] = [
+    [3, 5, "ember"],
+    [6, 3, "gold"],
+    [9, 5, "violet"],
+    [12, 4, "cloud"],
+  ];
+  for (const [x, y, color] of blooms) {
+    p.vline(x, y + 1, 9 - y - 1, "leaf");
+    p.px(x - 1, y + 2, "grass");
+    p.px(x + 1, y + 3, "grass");
+    p.px(x, y, color);
+    p.px(x - 1, y, color);
+    p.px(x + 1, y, color);
+    p.px(x, y - 1, color);
+    p.px(x, y + 1 > 8 ? y : y + 1, "sun");
+  }
+}
+
+/** Paints the whole tileset (layout defined by TILESET) onto its canvas. */
 export function paintTileset(ctx: CanvasRenderingContext2D): void {
   ctx.imageSmoothingEnabled = false;
   ctx.clearRect(0, 0, TILESET_WIDTH, TILESET_HEIGHT);
@@ -253,8 +339,11 @@ export function paintTileset(ctx: CanvasRenderingContext2D): void {
   }
   paintBush(tilePainter(ctx, TILESET.bush));
   paintRock(tilePainter(ctx, TILESET.rock));
+  paintPlanter(tilePainter(ctx, TILESET.planter));
   for (let mask = 0; mask < 16; mask += 1) {
     paintPath(tilePainter(ctx, TILESET.path + mask), mask);
+    paintCobble(tilePainter(ctx, TILESET.cobble + mask), mask);
+    paintBridge(tilePainter(ctx, TILESET.bridge + mask), mask);
     for (let frame = 0; frame < TILESET.waterFrames; frame += 1) {
       paintWater(tilePainter(ctx, TILESET.water + frame * 16 + mask), mask, frame);
     }
