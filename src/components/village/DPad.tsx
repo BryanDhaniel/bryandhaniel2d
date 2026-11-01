@@ -34,7 +34,8 @@ interface DPadProps {
 }
 
 /**
- * Touch controls. Hidden from assistive tech: keyboard play and the plain view are the
+ * Touch controls: the D-pad, two buttons that turn the camera, and the action button.
+ * Hidden from assistive tech: keyboard play and the plain view are the
  * accessible routes, and these only make sense as press-and-hold pointer targets.
  */
 export function DPad({ bridge, canInteract }: DPadProps) {
@@ -80,18 +81,37 @@ export function DPad({ bridge, canInteract }: DPadProps) {
           </button>
         ))}
       </div>
-      <button
-        type="button"
-        tabIndex={-1}
-        disabled={!canInteract}
-        onPointerDown={(event) => {
-          event.preventDefault();
-          bridge.emit("interact", null);
-        }}
-        className="pointer-events-auto pixel-button size-20 touch-none bg-gold text-2xl font-bold text-ink select-none disabled:bg-mist"
-      >
-        A
-      </button>
+      <div className="pointer-events-auto flex flex-col items-end gap-2">
+        <div className="flex gap-2">
+          {([-1, 1] as const).map((direction) => (
+            <button
+              key={direction}
+              type="button"
+              tabIndex={-1}
+              onPointerDown={(event) => {
+                event.preventDefault();
+                bridge.emit("rotateCamera", { direction });
+              }}
+              onContextMenu={(event) => event.preventDefault()}
+              className="pixel-button size-12 touch-none bg-cloud/90 select-none active:bg-gold"
+            >
+              <PixelIcon name={direction < 0 ? "turnLeft" : "turnRight"} size={20} />
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          tabIndex={-1}
+          disabled={!canInteract}
+          onPointerDown={(event) => {
+            event.preventDefault();
+            bridge.emit("interact", null);
+          }}
+          className="pointer-events-auto pixel-button size-20 touch-none bg-gold text-2xl font-bold text-ink select-none disabled:bg-mist"
+        >
+          A
+        </button>
+      </div>
     </div>
   );
 }

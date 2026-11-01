@@ -15,6 +15,14 @@ const eslintConfig = defineConfig([
       "no-console": ["warn", { allow: ["warn", "error"] }],
     },
   },
+  {
+    // The 3D world drives three.js imperatively from React Three Fiber frame callbacks, which
+    // mutate scene objects by design; the React Compiler's immutability rule can't model that.
+    files: ["src/game3d/**/*.tsx"],
+    rules: {
+      "react-hooks/immutability": "off",
+    },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Default ignores of eslint-config-next:

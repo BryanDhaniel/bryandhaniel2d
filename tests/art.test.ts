@@ -1,6 +1,5 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { packSprites } from "@/game/art/atlas";
 import {
   CAT_FRAMES,
   CHARACTER_LOOKS,
@@ -10,19 +9,20 @@ import {
 } from "@/game/art/characters";
 import { HEART, ICONS } from "@/game/art/icons";
 import { artSize, validateArt } from "@/game/art/pixels";
-import { ATLAS_SPRITES } from "@/game/art/sprites";
-import { ATLAS_GROUPS } from "@/game/assets/manifest";
+import { CHARACTER_SHEET } from "@/game3d/textures/sprites";
+import { SURFACE_NAMES } from "@/game3d/textures/surfaces";
+import { tileUv } from "@/game3d/textures/tileset";
 import { PALETTE, PALETTE_NAMES, PIXEL_KEYS } from "@/game/palette";
 
 describe("palette", () => {
-  it("has exactly 24 unique colours", () => {
-    expect(PALETTE_NAMES).toHaveLength(24);
-    expect(new Set(Object.values(PALETTE)).size).toBe(24);
+  it("has exactly 32 unique colours", () => {
+    expect(PALETTE_NAMES).toHaveLength(32);
+    expect(new Set(Object.values(PALETTE)).size).toBe(32);
   });
 
   it("gives every colour exactly one pixel key", () => {
     const mapped = Object.values(PIXEL_KEYS);
-    expect(mapped).toHaveLength(24);
+    expect(mapped).toHaveLength(32);
     expect(new Set(mapped)).toEqual(new Set(PALETTE_NAMES));
   });
 
@@ -69,33 +69,39 @@ describe("pixel art", () => {
   });
 });
 
-describe("atlases", () => {
-  it.each(ATLAS_GROUPS)("%s packs without overlaps inside the atlas", (group) => {
-    const defs = ATLAS_SPRITES[group]();
-    const packed = packSprites(defs);
-    expect(packed.frames).toHaveLength(defs.length);
-    expect(packed.width).toBeLessThanOrEqual(512);
-    for (const a of packed.frames) {
-      expect(a.x + a.width).toBeLessThanOrEqual(packed.width);
-      expect(a.y + a.height).toBeLessThanOrEqual(packed.height);
-      for (const b of packed.frames) {
-        if (a === b) continue;
-        const overlap =
-          a.x < b.x + b.width &&
-          b.x < a.x + a.width &&
-          a.y < b.y + b.height &&
-          b.y < a.y + a.height;
-        expect(overlap, `${a.name} overlaps ${b.name}`).toBe(false);
+describe("textures", () => {
+  it("lays out the character sheet without overlapping rows", () => {
+    const { people, facings, cat, bird, rows, columns, blinkColumn } = CHARACTER_SHEET;
+    const used = new Set<number>();
+    for (const first of Object.values(people)) {
+      for (let facing = 0; facing < facings.length; facing += 1) {
+        expect(used.has(first + facing)).toBe(false);
+        used.add(first + facing);
       }
     }
+    for (const row of [cat.row, bird.row]) {
+      expect(used.has(row)).toBe(false);
+      used.add(row);
+    }
+    expect(Math.max(...used)).toBeLessThan(rows);
+    expect(blinkColumn).toBeLessThan(columns);
+    expect(WALK_FRAMES).toBeLessThanOrEqual(blinkColumn);
   });
 
-  it("names every player walk frame the way the README documents", () => {
-    const names = new Set(ATLAS_SPRITES.characters().map((def) => def.name));
-    for (const facing of FACINGS) {
-      for (let frame = 0; frame < WALK_FRAMES; frame += 1) {
-        expect(names.has(`player/${facing}/${frame}`)).toBe(true);
-      }
-    }
+  it("maps every ground tile id to its own cell of the tileset", () => {
+    const rect = new Float32Array(4);
+    tileUv(1, rect);
+    const [u0, v0, u1, v1] = Array.from(rect);
+    expect(u0).toBeGreaterThanOrEqual(0);
+    expect(v1).toBeLessThanOrEqual(1);
+    expect(u1 - (u0 ?? 0)).toBeCloseTo(16 / 256, 3);
+    expect(v1 - (v0 ?? 0)).toBeCloseTo(16 / 144, 3);
+    const next = new Float32Array(4);
+    tileUv(2, next);
+    expect(next[0]).toBeCloseTo(u1 ?? 0, 3);
+  });
+
+  it("names each tiling surface once", () => {
+    expect(new Set(SURFACE_NAMES).size).toBe(SURFACE_NAMES.length);
   });
 });

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { buildNavigation } from "@/game/map/navigation";
 import { FIRST_GID, LAYER, TILESET, buildTiledMap, type TiledTileLayer } from "@/game/map/tiled";
 import { BUILDINGS, VILLAGE_ROWS, parseVillage } from "@/game/map/village";
-import { GridPathfinder } from "@/game/systems/pathfinding";
+import { GridPathfinder } from "@/game3d/systems/pathfinding";
 import { portfolio } from "@/content/portfolio";
 
 const village = parseVillage();

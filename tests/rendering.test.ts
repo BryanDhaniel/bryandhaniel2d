@@ -1,146 +1,41 @@
 import { describe, expect, it } from "vitest";
-import { QUALITY, RENDER, WATER } from "@/game/config/visuals";
-import { tileLayer } from "@/game/map/navigation";
-import { LAYER, buildTiledMap, isWaterGid } from "@/game/map/tiled";
-import { QUALITY_FEATURES, QualityManager } from "@/game/settings/QualityManager";
+import { QUALITY, QUALITY_TIERS, WORLD } from "@/game3d/config/visuals";
+import { buildTerrainGeometry, computeGroundOcclusion } from "@/game3d/scene/terrainGeometry";
+import { QualityManager } from "@/game3d/settings/QualityManager";
+import { computeShoreDistance } from "@/game3d/shaders/water";
+import { InputController } from "@/game3d/systems/input";
+import { buildLayout } from "@/game3d/world/layout";
 import type { QualityLevel, QualitySetting } from "@/game/settings/types";
-import { computeLayout } from "@/game/systems/viewport";
-import { computeWaterMask } from "@/game/systems/waterMask";
 import { defaultQualityFor } from "@/lib/settings";
 
-describe("viewport layout", () => {
-  it("shows 320x180 world pixels on a 1080p screen", () => {
-    expect(computeLayout(1920, 1080, 1)).toMatchObject({
-      zoom: 6,
-      viewWidth: 320,
-      viewHeight: 180,
-      canvasWidth: 320 + RENDER.cameraMargin * 2,
-      canvasHeight: 180 + RENDER.cameraMargin * 2,
-      windowLeft: 0,
-      windowTop: 0,
-      windowWidth: 1920,
-      windowHeight: 1080,
-    });
-  });
+const layout = buildLayout();
 
-  it("fills a phone held upright", () => {
-    expect(computeLayout(360, 740, 2)).toMatchObject({
-      zoom: 4,
-      viewWidth: 180,
-      viewHeight: 370,
-      windowWidth: 360,
-      windowHeight: 740,
-    });
-  });
-
-  it("letterboxes very wide screens instead of showing more of the world", () => {
-    const layout = computeLayout(3840, 1080, 1);
-    expect(layout.viewWidth).toBe(RENDER.maxViewWidth);
-    expect(layout.windowWidth).toBe(RENDER.maxViewWidth * layout.zoom);
-    expect(layout.windowLeft).toBe((3840 - layout.windowWidth) / 2);
-  });
-
-  it("always scales by a whole number of device pixels and covers the window", () => {
-    const screens = [
-      [1366, 768, 1],
-      [1440, 900, 2],
-      [390, 844, 3],
-      [1280, 720, 1.25],
-      [2560, 1440, 1.5],
-      [200, 120, 1],
-    ] as const;
-    for (const [width, height, ratio] of screens) {
-      const layout = computeLayout(width, height, ratio);
-      expect(Number.isInteger(layout.zoom)).toBe(true);
-      expect(layout.zoom).toBeGreaterThanOrEqual(1);
-      expect(layout.viewWidth * layout.zoom).toBeGreaterThanOrEqual(
-        Math.round(layout.windowWidth * layout.ratio),
-      );
-      expect(layout.viewHeight * layout.zoom).toBeGreaterThanOrEqual(
-        Math.round(layout.windowHeight * layout.ratio),
-      );
-      expect(layout.canvasWidth).toBe(layout.viewWidth + layout.margin * 2);
-    }
-  });
-});
-
-describe("quality manager", () => {
-  function track(setting: QualitySetting) {
-    const changes: QualityLevel[] = [];
-    const manager = new QualityManager(setting, (level) => changes.push(level));
-    return { manager, changes };
-  }
-
-  function feed(manager: QualityManager, frameMs: number, totalMs: number): void {
-    for (let elapsed = 0; elapsed < totalMs; elapsed += frameMs) {
-      manager.sample(frameMs);
-    }
-  }
-
-  const FIRST_VERDICT_MS = QUALITY.auto.warmupMs + QUALITY.auto.windowMs + 100;
-
-  it("maps each level to its features", () => {
-    expect(QUALITY_FEATURES.low).toMatchObject({
-      lighting: false,
-      postFx: false,
-      shadows: "blob",
+describe("quality tiers", () => {
+  it("match the documented tiers", () => {
+    expect(QUALITY_TIERS.low).toMatchObject({
+      maxDpr: 1,
+      sunShadows: false,
+      post: false,
       reflections: false,
-      weather: false,
+      weather: "off",
     });
-    expect(QUALITY_FEATURES.medium).toMatchObject({
-      lighting: true,
-      postFx: true,
-      shadows: "full",
+    expect(QUALITY_TIERS.medium).toMatchObject({
+      sunShadows: true,
+      shadowMapSize: 1024,
+      post: true,
       reflections: false,
-      weather: false,
+      weather: "light",
     });
-    expect(
-      Object.values(QUALITY_FEATURES.high).every((value) => value === true || value === "full"),
-    ).toBe(true);
-  });
-
-  it("starts Auto at High and steps down one level per slow window", () => {
-    const { manager, changes } = track("auto");
-    expect(manager.level).toBe("high");
-    feed(manager, 40, FIRST_VERDICT_MS);
-    expect(changes).toEqual(["medium"]);
-    feed(manager, 40, 10_000);
-    expect(changes).toEqual(["medium", "low"]);
-    feed(manager, 40, 10_000);
-    expect(manager.level).toBe("low");
-    expect(changes).toHaveLength(2);
-  });
-
-  it("keeps High at a steady 60 FPS, then stops measuring", () => {
-    const { manager, changes } = track("auto");
-    const settleMs =
-      QUALITY.auto.warmupMs + QUALITY.auto.windowMs * QUALITY.auto.stableWindows + 500;
-    feed(manager, 1000 / 60, settleMs);
-    feed(manager, 40, 20_000);
-    expect(manager.level).toBe("high");
-    expect(changes).toEqual([]);
-  });
-
-  it("treats stalls such as a hidden tab as stalls, not slowness", () => {
-    const { manager, changes } = track("auto");
-    feed(manager, QUALITY.auto.stallMs + 50, 30_000);
-    expect(changes).toEqual([]);
-    for (let burst = 0; burst < 10; burst += 1) {
-      feed(manager, 1000 / 60, 3000);
-      manager.sample(500);
-    }
-    expect(changes).toEqual([]);
-  });
-
-  it("leaves fixed levels alone and restarts at High when switched to Auto", () => {
-    const { manager, changes } = track("medium");
-    feed(manager, 40, 20_000);
-    expect(manager.level).toBe("medium");
-    expect(changes).toEqual([]);
-    manager.setSetting("auto");
-    expect(manager.level).toBe("high");
-    feed(manager, 40, FIRST_VERDICT_MS);
-    expect(changes).toEqual(["high", "medium"]);
+    expect(QUALITY_TIERS.high).toMatchObject({
+      maxDpr: 2,
+      shadowMapSize: 2048,
+      ssao: true,
+      tiltShift: true,
+      reflections: true,
+      shafts: true,
+      cones: true,
+      weather: "full",
+    });
   });
 
   it("defaults to Low on touch, reduced-motion and low-power devices", () => {
@@ -152,62 +47,143 @@ describe("quality manager", () => {
   });
 });
 
-describe("water mask", () => {
-  const map = buildTiledMap();
-  const mask = computeWaterMask(map);
-  const ground = tileLayer(map, LAYER.ground)?.data ?? [];
-  const isWater = (tx: number, ty: number) =>
-    tx >= 0 &&
-    ty >= 0 &&
-    tx < map.width &&
-    ty < map.height &&
-    isWaterGid(ground[ty * map.width + tx] ?? 0);
-  const texel = (x: number, y: number) => (y * mask.width + x) * 4;
+describe("quality manager", () => {
+  function track(setting: QualitySetting) {
+    const changes: QualityLevel[] = [];
+    const manager = new QualityManager(setting, (level) => changes.push(level));
+    return { manager, changes };
+  }
 
-  it("covers the world at one texel per pixel, fully opaque", () => {
-    expect(mask.width).toBe(map.width * map.tilewidth);
-    expect(mask.height).toBe(map.height * map.tileheight);
-    expect(mask.data).toHaveLength(mask.width * mask.height * 4);
-    expect(mask.data.every((value, index) => index % 4 !== 3 || value === 255)).toBe(true);
+  function frames(manager: QualityManager, fps: number, seconds: number): boolean {
+    let offered = false;
+    for (let i = 0; i < fps * seconds; i += 1) offered = manager.sampleFrame(1 / fps) || offered;
+    return offered;
+  }
+
+  it("steps Auto up and down one tier at a time within the range", () => {
+    const { manager, changes } = track("auto");
+    expect(manager.level).toBe(QUALITY.autoStart);
+    manager.incline();
+    manager.incline();
+    expect(manager.level).toBe("high");
+    manager.decline();
+    manager.decline();
+    manager.decline();
+    expect(manager.level).toBe("low");
+    expect(changes).toEqual(["high", "medium", "low"]);
   });
 
-  it("marks exactly the water tiles", () => {
-    const wrong: string[] = [];
-    for (let ty = 0; ty < map.height; ty += 1) {
-      for (let tx = 0; tx < map.width; tx += 1) {
-        const centre = texel(tx * map.tilewidth + 8, ty * map.tileheight + 8);
-        if ((mask.data[centre] === 255) !== isWater(tx, ty)) wrong.push(`${tx},${ty}`);
-      }
-    }
-    expect(wrong).toEqual([]);
+  it("ignores the monitor for fixed settings", () => {
+    const { manager, changes } = track("medium");
+    manager.incline();
+    manager.decline();
+    expect(manager.level).toBe("medium");
+    expect(changes).toEqual([]);
+    manager.setSetting("auto");
+    expect(changes).toEqual([QUALITY.autoStart]);
   });
 
-  it("insets the shoreline and measures depth below it for reflections", () => {
-    let shores = 0;
-    for (let ty = 1; ty < map.height; ty += 1) {
-      for (let tx = 0; tx < map.width; tx += 1) {
-        if (!isWater(tx, ty) || isWater(tx, ty - 1)) continue;
-        shores += 1;
-        const x = tx * map.tilewidth + 8;
-        const top = ty * map.tileheight;
-        for (let y = 0; y < WATER.shoreInset; y += 1) {
-          expect(mask.data[texel(x, top + y)]).toBe(0);
-        }
-        const shoreline = texel(x, top + WATER.shoreInset);
-        expect(mask.data[shoreline]).toBe(255);
-        expect(mask.data[shoreline + 1]).toBe(0);
-        expect(mask.data[texel(x, top + WATER.shoreInset + 4) + 1]).toBe(4);
-      }
-    }
-    expect(shores).toBeGreaterThan(0);
+  it("offers the plain view once after sustained slowness on Low", () => {
+    const { manager } = track("low");
+    expect(frames(manager, 24, QUALITY.lowFpsSeconds - 1)).toBe(false);
+    expect(frames(manager, 24, 2)).toBe(true);
+    expect(frames(manager, 24, 10)).toBe(false);
   });
 
-  it("scatters the same puddles on the paths every time", () => {
-    let puddle = 0;
-    for (let i = 2; i < mask.data.length; i += 4) {
-      if (mask.data[i] === 255) puddle += 1;
+  it("treats stalls as stalls, and fast frames as fine", () => {
+    const { manager } = track("low");
+    for (let second = 0; second < 20; second += 1) {
+      frames(manager, 60, 1);
+      manager.sampleFrame(2);
     }
-    expect(puddle).toBeGreaterThan(WATER.puddles * 5);
-    expect(computeWaterMask(map).data).toEqual(mask.data);
+    expect(frames(manager, 60, 10)).toBe(false);
+    const medium = track("medium").manager;
+    expect(frames(medium, 20, 20)).toBe(false);
+  });
+});
+
+describe("water", () => {
+  const shore = computeShoreDistance(layout);
+  const resolution = 8;
+  const width = layout.width * resolution;
+  const at = (x: number, z: number) =>
+    shore[Math.floor(z * resolution) * width + Math.floor(x * resolution)] ?? 0;
+
+  it("is zero on land and grows away from the banks", () => {
+    const pond = layout.village.ground.findIndex((ground) => ground === "water");
+    const land = layout.village.ground.findIndex((ground) => ground === "grass");
+    expect(at((land % layout.width) + 0.5, Math.floor(land / layout.width) + 0.5)).toBe(0);
+    let deepest = 0;
+    layout.village.ground.forEach((ground, index) => {
+      if (ground === "water")
+        deepest = Math.max(
+          deepest,
+          at((index % layout.width) + 0.5, Math.floor(index / layout.width) + 0.5),
+        );
+    });
+    expect(pond).toBeGreaterThanOrEqual(0);
+    expect(deepest).toBeGreaterThan(128);
+  });
+});
+
+describe("terrain", () => {
+  it("builds a top face for every dry tile and sides wherever the ground steps down", () => {
+    const geometry = buildTerrainGeometry(layout);
+    const dry = layout.village.ground.filter(
+      (ground) => ground !== "water" && ground !== "bridge",
+    ).length;
+    expect(geometry.top.getAttribute("position").count).toBe(dry * 6);
+    expect(geometry.top.getAttribute("uv1").count).toBe(dry * 6);
+    expect(geometry.kerb.getAttribute("position").count).toBeGreaterThan(0);
+    expect(geometry.bank.getAttribute("position").count).toBeGreaterThan(0);
+    // The diorama skirt drops to the base on every outer edge.
+    const positions = geometry.earth.getAttribute("position");
+    let lowest = 0;
+    for (let i = 0; i < positions.count; i += 1) lowest = Math.min(lowest, positions.getY(i));
+    expect(lowest).toBeCloseTo(-WORLD.baseDepth);
+    Object.values(geometry).forEach((part) => part.dispose());
+  });
+
+  it("darkens the ground around buildings more than open grass", () => {
+    const resolution = 4;
+    const occlusion = computeGroundOcclusion(layout, resolution);
+    const w = layout.width * resolution;
+    const sample = (x: number, z: number) =>
+      occlusion[Math.floor(z * resolution) * w + Math.floor(x * resolution)] ?? 0;
+    const home = layout.buildings.find((building) => building.id === "home");
+    expect(home).toBeDefined();
+    if (!home) return;
+    const besideWall = sample(home.rect.x - 0.2, home.rect.y + 1.5);
+    const openGrass = sample(28.5, 9.5);
+    expect(besideWall).toBeLessThan(openGrass);
+  });
+});
+
+describe("input", () => {
+  it("turns keys and the D-pad into screen-relative intent", () => {
+    const input = new InputController();
+    input.setDpad(0, -1);
+    input.update();
+    expect(input.intent).toEqual({ x: 0, y: 1 });
+    input.setDpad(1, 1);
+    input.update();
+    expect(input.intent.x).toBeCloseTo(Math.SQRT1_2);
+    expect(input.intent.y).toBeCloseTo(-Math.SQRT1_2);
+    input.reset();
+    input.update();
+    expect(input.intent).toEqual({ x: 0, y: 0 });
+  });
+
+  it("queues interactions, turns and taps until consumed", () => {
+    const input = new InputController();
+    input.queueInteract();
+    input.queueTurn(1);
+    input.queueTap({ tileX: 3, tileZ: 4, buildingIndex: -1 });
+    expect(input.consumeInteract()).toBe(true);
+    expect(input.consumeInteract()).toBe(false);
+    expect(input.consumeTurn()).toBe(1);
+    expect(input.consumeTurn()).toBe(0);
+    expect(input.consumeTap()).toEqual({ tileX: 3, tileZ: 4, buildingIndex: -1 });
+    expect(input.consumeTap()).toBeNull();
   });
 });

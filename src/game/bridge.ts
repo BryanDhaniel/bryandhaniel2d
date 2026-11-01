@@ -8,7 +8,7 @@ import type {
 } from "./settings/types";
 
 /**
- * A tiny typed event channel between React (overlays, HUD) and Phaser (the world).
+ * A tiny typed event channel between React (overlays, HUD) and the 3D world.
  * One instance per mounted game, so React strict-mode remounts never share listeners.
  * Handlers take a single payload argument to avoid per-call array allocation.
  */
@@ -43,8 +43,7 @@ export class Channel<Events extends object> {
 
   /**
    * A view of this channel whose subscriptions can all be dropped at once, and which stops
-   * emitting after `dispose()`. Each game instance gets its own scope so a game that is being
-   * torn down (Phaser destroys on the next frame) can't talk to the UI any more.
+   * emitting after `dispose()`, so a world that is being torn down can't talk to the UI.
    */
   scope(): ScopedChannel<Events> {
     const subscriptions = new Set<() => void>();
@@ -143,7 +142,10 @@ export interface UiToGameEvents {
   setTimeMode: { mode: TimeMode };
   setWeather: { kind: WeatherKind };
   setQuality: { setting: QualitySetting };
-  setRetro: { enabled: boolean };
+  setVisualOptions: { pixelMode: boolean; grain: boolean; aberration: boolean };
+  /** Quarter-turn the camera: -1 counter-clockwise (Q), 1 clockwise (R). */
+  rotateCamera: { direction: 1 | -1 };
+  /** D-pad direction in screen terms (y down), each -1, 0 or 1. */
   dpad: { x: number; y: number };
   interact: null;
   travel: { sectionId: SectionId };

@@ -4,7 +4,6 @@ import { AnimatePresence, MotionConfig, motion } from "framer-motion";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { getSection, portfolio, type SectionId } from "@/content/portfolio";
-import { ASSET_SOURCES } from "@/game/assets/manifest";
 import { GameBridge, type GameToUiEvents, type MapInfo } from "@/game/bridge";
 import type {
   DayPhase,
@@ -13,7 +12,8 @@ import type {
   TimeMode,
   WeatherKind,
 } from "@/game/settings/types";
-import { AudioSystem } from "@/game/systems/audio";
+import { AUDIO_SOURCES } from "@/game3d/config/assets";
+import { AudioSystem } from "@/game3d/systems/audio";
 import { useCapabilities } from "@/lib/capabilities";
 import { useMediaQuery, useStoredValue } from "@/lib/hooks";
 import { defaultQualityFor, storedQuality, storedTimeMode, storedWeather } from "@/lib/settings";
@@ -27,7 +27,7 @@ import { LoadingScreen } from "./LoadingScreen";
 import { GameErrorNotice, LowFpsToast, PlainViewOffer, WebGLFallback } from "./Notices";
 import { SectionPanel } from "./SectionPanel";
 
-// Phaser is only ever downloaded and run in the browser, and only on this route.
+// three.js and the 3D world are only ever downloaded and run in the browser, on this route.
 const GameCanvas = dynamic(() => import("./GameCanvas"), { ssr: false });
 
 const INITIAL_PROGRESS = { value: 0.08, label: "Packing the engine" };
@@ -48,10 +48,12 @@ export function VillageApp() {
     useStoredValue("local", STORAGE_KEYS.quality),
     defaultQualityFor({ touch, reducedMotion, lowPower: capabilities?.lowPower ?? false }),
   );
-  const retro = useStoredValue("local", STORAGE_KEYS.retro) === "1";
+  const pixelMode = useStoredValue("local", STORAGE_KEYS.pixelMode) === "1";
+  const grain = useStoredValue("local", STORAGE_KEYS.grain) === "1";
+  const aberration = useStoredValue("local", STORAGE_KEYS.aberration) === "1";
 
   const [bridge] = useState(() => new GameBridge());
-  const [audio] = useState(() => new AudioSystem(ASSET_SOURCES.audio));
+  const [audio] = useState(() => new AudioSystem(AUDIO_SOURCES));
   const [progress, setProgress] = useState(INITIAL_PROGRESS);
   const [mapInfo, setMapInfo] = useState<MapInfo | null>(null);
   const [fatal, setFatal] = useState<Fatal | null>(null);
@@ -161,9 +163,15 @@ export function VillageApp() {
     audio.play("blip");
   };
 
-  const changeRetro = (enabled: boolean) => {
-    writeFlag("local", STORAGE_KEYS.retro, enabled);
-    bridge.emit("setRetro", { enabled });
+  const changeVisualOptions = (next: {
+    pixelMode: boolean;
+    grain: boolean;
+    aberration: boolean;
+  }) => {
+    writeFlag("local", STORAGE_KEYS.pixelMode, next.pixelMode);
+    writeFlag("local", STORAGE_KEYS.grain, next.grain);
+    writeFlag("local", STORAGE_KEYS.aberration, next.aberration);
+    bridge.emit("setVisualOptions", next);
     audio.play("blip");
   };
 
@@ -243,11 +251,13 @@ export function VillageApp() {
             weather,
             quality,
             qualityLevel,
-            retro,
+            pixelMode,
+            grain,
+            aberration,
             onTimeMode: changeTimeMode,
             onWeather: changeWeather,
             onQuality: changeQuality,
-            onRetro: changeRetro,
+            onVisualOptions: changeVisualOptions,
           }}
           onToggleMute={toggleMute}
           onTravel={travel}

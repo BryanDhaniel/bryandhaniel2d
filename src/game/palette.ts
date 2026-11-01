@@ -1,5 +1,6 @@
 /**
- * The single 24-colour palette used by every sprite, tile, UI surface and text colour.
+ * The single 32-colour palette used by every texture, sprite, light, UI surface, text colour
+ * and colour grade.
  *
  * - Game art references colours through the one-character PIXEL_KEYS below.
  * - The HTML UI reads the same values through CSS variables (`--c-<name>`) that the root
@@ -33,6 +34,14 @@ export const PALETTE = {
   gold: "#f8de6a",
   skin: "#ecbc9a",
   violet: "#8b5cc9",
+  rose: "#d47a8b",
+  plum: "#563a69",
+  clay: "#b5603f",
+  moss: "#4f6b2c",
+  olive: "#9b9a48",
+  teal: "#2a9d8f",
+  ochre: "#b9822f",
+  frost: "#d6e6f4",
 } as const;
 
 export type PaletteName = keyof typeof PALETTE;
@@ -65,6 +74,14 @@ export const PIXEL_KEYS = {
   Y: "gold",
   p: "skin",
   v: "violet",
+  R: "rose",
+  P: "plum",
+  c: "clay",
+  M: "moss",
+  V: "olive",
+  C: "teal",
+  a: "ochre",
+  x: "frost",
 } as const satisfies Record<string, PaletteName>;
 
 export type PixelKey = keyof typeof PIXEL_KEYS;
@@ -75,7 +92,7 @@ export function hex(name: PaletteName): string {
   return PALETTE[name];
 }
 
-/** Palette colour as a 0xRRGGBB number, the format Phaser expects for tints and fills. */
+/** Palette colour as a 0xRRGGBB number. */
 export function int(name: PaletteName): number {
   return Number.parseInt(PALETTE[name].slice(1), 16);
 }

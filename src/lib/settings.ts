@@ -36,7 +36,9 @@ export interface VillageSettings {
   timeMode: TimeMode;
   weather: WeatherKind;
   quality: QualitySetting;
-  retro: boolean;
+  pixelMode: boolean;
+  grain: boolean;
+  aberration: boolean;
 }
 
 /** Reads the visitor's saved settings (with defaults) straight from localStorage. */
@@ -45,6 +47,8 @@ export function readVillageSettings(defaultQuality: QualitySetting): VillageSett
     timeMode: storedTimeMode(readStorage("local", STORAGE_KEYS.timeMode)),
     weather: storedWeather(readStorage("local", STORAGE_KEYS.weather)),
     quality: storedQuality(readStorage("local", STORAGE_KEYS.quality), defaultQuality),
-    retro: readFlag("local", STORAGE_KEYS.retro, false),
+    pixelMode: readFlag("local", STORAGE_KEYS.pixelMode, false),
+    grain: readFlag("local", STORAGE_KEYS.grain, false),
+    aberration: readFlag("local", STORAGE_KEYS.aberration, false),
   };
 }

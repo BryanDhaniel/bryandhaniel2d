@@ -36,6 +36,14 @@
   --color-gold: var(--c-gold);
   --color-skin: var(--c-skin);
   --color-violet: var(--c-violet);
+  --color-rose: var(--c-rose);
+  --color-plum: var(--c-plum);
+  --color-clay: var(--c-clay);
+  --color-moss: var(--c-moss);
+  --color-olive: var(--c-olive);
+  --color-teal: var(--c-teal);
+  --color-ochre: var(--c-ochre);
+  --color-frost: var(--c-frost);
 
   --font-pixel: var(--font-pixelify), ui-monospace, monospace;
   --font-sans: var(--font-pixelify), ui-monospace, monospace;

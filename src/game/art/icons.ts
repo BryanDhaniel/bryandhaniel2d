@@ -185,6 +185,30 @@ export const ICONS = {
     "kkkkkkkkkk",
     "..........",
   ],
+  turnLeft: [
+    "..........",
+    "...k......",
+    "..kk......",
+    ".kkkkkkk..",
+    "..kk....k.",
+    "...k....k.",
+    "........k.",
+    ".......k..",
+    "...kkkk...",
+    "..........",
+  ],
+  turnRight: [
+    "..........",
+    "......k...",
+    "......kk..",
+    "..kkkkkkk.",
+    ".k....kk..",
+    ".k....k...",
+    ".k........",
+    "..k.......",
+    "...kkkk...",
+    "..........",
+  ],
 } as const satisfies Record<string, PixelArt>;
 
 export type IconName = keyof typeof ICONS;

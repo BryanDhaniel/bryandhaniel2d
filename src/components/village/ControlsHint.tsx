@@ -23,8 +23,8 @@ function Key({ children }: { children: ReactNode }) {
  */
 export function ControlsHint({ id, visible, touch }: ControlsHintProps) {
   const text = touch
-    ? "Use the D-pad or tap the ground to walk. Tap a building or press A at its door to look inside."
-    : "Walk with W A S D or the arrow keys, hold Shift to run, and press E at a door to look inside. You can also click to walk.";
+    ? "Use the D-pad or tap the ground to walk, the turn buttons to rotate the view and pinch to zoom. Tap a building or press A at its door to look inside."
+    : "Walk with W A S D or the arrow keys, hold Shift to run, turn the view with Q and R, zoom with plus, minus or the mouse wheel, and press E at a door to look inside. You can also click to walk.";
   return (
     <>
       <p id={id} className="sr-only">
@@ -49,6 +49,9 @@ export function ControlsHint({ id, visible, touch }: ControlsHintProps) {
                   <Key>S</Key>
                   <Key>D</Key>
                   <span>or arrows to walk ·</span>
+                  <Key>Q</Key>
+                  <Key>R</Key>
+                  <span>turn ·</span>
                   <Key>E</Key>
                   <span>to enter · click to walk</span>
                 </>

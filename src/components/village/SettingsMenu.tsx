@@ -74,11 +74,41 @@ interface SettingsMenuProps {
   weather: WeatherKind;
   quality: QualitySetting;
   qualityLevel: QualityLevel | null;
-  retro: boolean;
+  pixelMode: boolean;
+  grain: boolean;
+  aberration: boolean;
   onTimeMode: (mode: TimeMode) => void;
   onWeather: (kind: WeatherKind) => void;
   onQuality: (setting: QualitySetting) => void;
-  onRetro: (enabled: boolean) => void;
+  onVisualOptions: (options: { pixelMode: boolean; grain: boolean; aberration: boolean }) => void;
+}
+
+function Toggle({
+  label,
+  checked,
+  onChange,
+}: {
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="flex cursor-pointer items-center gap-3">
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        className="peer sr-only"
+      />
+      <span
+        aria-hidden="true"
+        className="grid size-6 shrink-0 place-items-center border-2 border-ink bg-cloud peer-checked:bg-gold peer-focus-visible:outline-3 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-violet"
+      >
+        {checked ? <PixelIcon name="close" size={10} /> : null}
+      </span>
+      <span className="text-sm">{label}</span>
+    </label>
+  );
 }
 
 /**
@@ -91,11 +121,13 @@ export function SettingsMenu({
   weather,
   quality,
   qualityLevel,
-  retro,
+  pixelMode,
+  grain,
+  aberration,
   onTimeMode,
   onWeather,
   onQuality,
-  onRetro,
+  onVisualOptions,
 }: SettingsMenuProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -127,7 +159,8 @@ export function SettingsMenu({
   const qualityHint =
     quality === "auto" && effective
       ? `Auto is using ${effective}.`
-      : "Low: no lighting or effects. High: everything.";
+      : "Low: no shadows or effects. High: everything.";
+  const visual = { pixelMode, grain, aberration };
 
   return (
     <div
@@ -172,7 +205,7 @@ export function SettingsMenu({
             options={WEATHER_OPTIONS}
             value={weather}
             onChange={onWeather}
-            hint={qualityLevel === "high" ? undefined : "Weather shows on High quality."}
+            hint={qualityLevel === "low" ? "Weather shows on Medium and High." : undefined}
           />
           <RadioGroup
             legend="Graphics"
@@ -182,21 +215,24 @@ export function SettingsMenu({
             onChange={onQuality}
             hint={qualityHint}
           />
-          <label className="flex cursor-pointer items-center gap-3">
-            <input
-              type="checkbox"
-              checked={retro}
-              onChange={(event) => onRetro(event.target.checked)}
-              className="peer sr-only"
+          <fieldset className="space-y-2">
+            <legend className="mb-1 text-sm tracking-wide text-slate uppercase">Effects</legend>
+            <Toggle
+              label="Pixel mode (low-res with outlines)"
+              checked={pixelMode}
+              onChange={(checked) => onVisualOptions({ ...visual, pixelMode: checked })}
             />
-            <span
-              aria-hidden="true"
-              className="grid size-6 place-items-center border-2 border-ink bg-cloud peer-checked:bg-gold peer-focus-visible:outline-3 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-violet"
-            >
-              {retro ? <PixelIcon name="close" size={10} /> : null}
-            </span>
-            <span className="text-sm">CRT &amp; film grain filter</span>
-          </label>
+            <Toggle
+              label="Film grain"
+              checked={grain}
+              onChange={(checked) => onVisualOptions({ ...visual, grain: checked })}
+            />
+            <Toggle
+              label="Chromatic aberration"
+              checked={aberration}
+              onChange={(checked) => onVisualOptions({ ...visual, aberration: checked })}
+            />
+          </fieldset>
         </div>
       ) : null}
     </div>
