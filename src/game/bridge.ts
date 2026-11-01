@@ -1,0 +1,134 @@
+import type { SectionId } from "@/content/portfolio";
+
+/**
+ * A tiny typed event channel between React (overlays, HUD) and Phaser (the world).
+ * One instance per mounted game, so React strict-mode remounts never share listeners.
+ * Handlers take a single payload argument to avoid per-call array allocation.
+ */
+export class Channel<Events extends object> {
+  private readonly handlers = new Map<keyof Events, Set<(payload: never) => void>>();
+
+  on<K extends keyof Events>(event: K, handler: (payload: Events[K]) => void): () => void {
+    let set = this.handlers.get(event);
+    if (!set) {
+      set = new Set();
+      this.handlers.set(event, set);
+    }
+    set.add(handler as (payload: never) => void);
+    return () => {
+      set.delete(handler as (payload: never) => void);
+    };
+  }
+
+  emit<K extends keyof Events>(event: K, payload: Events[K]): void {
+    const set = this.handlers.get(event);
+    if (!set) {
+      return;
+    }
+    for (const handler of set) {
+      (handler as (value: Events[K]) => void)(payload);
+    }
+  }
+
+  clear(): void {
+    this.handlers.clear();
+  }
+
+  /**
+   * A view of this channel whose subscriptions can all be dropped at once, and which stops
+   * emitting after `dispose()`. Each game instance gets its own scope so a game that is being
+   * torn down (Phaser destroys on the next frame) can't talk to the UI any more.
+   */
+  scope(): ScopedChannel<Events> {
+    const subscriptions = new Set<() => void>();
+    let active = true;
+    return {
+      on: (event, handler) => {
+        if (!active) {
+          return () => {};
+        }
+        const off = this.on(event, handler);
+        subscriptions.add(off);
+        return () => {
+          off();
+          subscriptions.delete(off);
+        };
+      },
+      emit: (event, payload) => {
+        if (active) {
+          this.emit(event, payload);
+        }
+      },
+      dispose: () => {
+        active = false;
+        subscriptions.forEach((off) => off());
+        subscriptions.clear();
+      },
+    };
+  }
+}
+
+export interface EventPort<Events extends object> {
+  on<K extends keyof Events>(event: K, handler: (payload: Events[K]) => void): () => void;
+  emit<K extends keyof Events>(event: K, payload: Events[K]): void;
+}
+
+export interface ScopedChannel<Events extends object> extends EventPort<Events> {
+  dispose(): void;
+}
+
+export interface MapMarker {
+  buildingId: string;
+  sectionId: SectionId;
+  label: string;
+  tileX: number;
+  tileY: number;
+}
+
+/** Terrain classes for the HUD mini-map, one byte per tile. */
+export const MINIMAP_TERRAIN = {
+  grass: 0,
+  path: 1,
+  water: 2,
+  forest: 3,
+  blocked: 4,
+  building: 5,
+} as const;
+
+export interface MapInfo {
+  width: number;
+  height: number;
+  terrain: Uint8Array;
+  markers: MapMarker[];
+}
+
+export interface PlayerPosition {
+  /** Position in tiles (fractional). The same object is reused between events. */
+  x: number;
+  y: number;
+}
+
+export interface GameToUiEvents {
+  progress: { value: number; label: string };
+  ready: MapInfo;
+  near: { sectionId: SectionId | null; label: string | null };
+  open: { sectionId: SectionId };
+  location: { name: string };
+  moved: null;
+  position: PlayerPosition;
+  lowFps: null;
+  fatal: { reason: "webgl" | "assets" | "runtime"; message: string };
+}
+
+export interface UiToGameEvents {
+  pause: { paused: boolean };
+  night: { enabled: boolean };
+  dpad: { x: number; y: number };
+  interact: null;
+  travel: { sectionId: SectionId };
+  resetInput: null;
+}
+
+export type Events = GameToUiEvents & UiToGameEvents;
+
+export class GameBridge extends Channel<Events> {}
