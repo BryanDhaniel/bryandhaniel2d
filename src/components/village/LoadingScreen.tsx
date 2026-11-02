@@ -1,10 +1,10 @@
 import { portfolio } from "@/content/portfolio";
-import { CHARACTER_LOOKS, characterFrame } from "@/game/art/characters";
-import { PixelSprite } from "@/components/PixelSprite";
+import { PixelGrid } from "@/components/PixelGrid";
+import { playerFrame } from "@/game3d/entities/Player/art";
 import { SkipLink } from "./SkipLink";
 
 const SEGMENTS = 20;
-const PLAYER_ART = characterFrame(CHARACTER_LOOKS.player, "down", 0);
+const PLAYER_ART = playerFrame("down", "idle", 0);
 
 interface LoadingScreenProps {
   value: number;
@@ -20,7 +20,9 @@ export function LoadingScreen({ value, label }: LoadingScreenProps) {
       <div className="absolute top-3 right-3">
         <SkipLink />
       </div>
-      <PixelSprite art={PLAYER_ART} roles={CHARACTER_LOOKS.player.roles} scale={6} />
+      <div className="bg-mist/90 p-2 pixel-panel">
+        <PixelGrid rows={PLAYER_ART} scale={6} />
+      </div>
       <div className="text-center">
         <p className="text-sm tracking-[0.3em] text-gold uppercase">{portfolio.profile.name}</p>
         <p className="mt-2 text-3xl leading-tight font-bold sm:text-5xl">

@@ -44,6 +44,20 @@
   --color-teal: var(--c-teal);
   --color-ochre: var(--c-ochre);
   --color-frost: var(--c-frost);
+  --color-jet: var(--c-jet);
+  --color-raven: var(--c-raven);
+  --color-storm: var(--c-storm);
+  --color-steel: var(--c-steel);
+  --color-coal: var(--c-coal);
+  --color-carbon: var(--c-carbon);
+  --color-graphite: var(--c-graphite);
+  --color-pewter: var(--c-pewter);
+  --color-void: var(--c-void);
+  --color-charcoal: var(--c-charcoal);
+  --color-flint: var(--c-flint);
+  --color-soot: var(--c-soot);
+  --color-silver: var(--c-silver);
+  --color-chalk: var(--c-chalk);
 
   --font-pixel: var(--font-pixelify), ui-monospace, monospace;
   --font-sans: var(--font-pixelify), ui-monospace, monospace;

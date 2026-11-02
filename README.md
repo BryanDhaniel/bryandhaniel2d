@@ -5,7 +5,7 @@ An HD-2D village portfolio for **Bryan Dhaniel (Kiznaiver)**, Software Engineer 
 - **Next.js 16** (App Router, Cache Components) + TypeScript (strict) + Tailwind CSS 4
 - **three.js** with **React Three Fiber**, **drei** and **postprocessing**, loaded client-side only with `next/dynamic` (`ssr: false`). `/plain` never loads three.js.
 - **zustand** for game state, **Framer Motion** for the HTML panels
-- All art and sound are generated in code from one 32-colour palette. No binary assets are required; real models, sprite sheets, LUTs and normal maps can be swapped in by path.
+- All art and sound are generated in code from one 46-colour palette. No binary assets are required; real models, sprite sheets, LUTs and normal maps can be swapped in by path.
 
 | Building      | Section              |
 | ------------- | -------------------- |
@@ -26,15 +26,16 @@ npm run dev
 
 Open http://localhost:3000. The recruiter-friendly page is http://localhost:3000/plain.
 
-| Script           | What it does                                                                 |
-| ---------------- | ---------------------------------------------------------------------------- |
-| `npm run dev`    | Development server                                                           |
-| `npm run build`  | Production build (all routes prerender as static)                            |
-| `npm start`      | Serve the production build                                                   |
-| `npm run check`  | Type-check, lint, Prettier check and unit tests in one go                    |
-| `npm run lint`   | ESLint (Next.js + TypeScript rules + Prettier compat)                        |
-| `npm run format` | Prettier (with Tailwind class sorting)                                       |
-| `npm test`       | Vitest: layout, collision, pathing, day/night, grades, quality, art, content |
+| Script            | What it does                                                                    |
+| ----------------- | ------------------------------------------------------------------------------- |
+| `npm run dev`     | Development server                                                              |
+| `npm run build`   | Production build (all routes prerender as static)                               |
+| `npm start`       | Serve the production build                                                      |
+| `npm run check`   | Type-check, lint, Prettier check and unit tests in one go                       |
+| `npm run lint`    | ESLint (Next.js + TypeScript rules + Prettier compat)                           |
+| `npm run format`  | Prettier (with Tailwind class sorting)                                          |
+| `npm test`        | Vitest: layout, collision, pathing, day/night, grades, quality, art, content    |
+| `npm run sprites` | Export the player atlas, portrait and palette to `public/assets/sprites/player` |
 
 ## Deploy to Vercel
 
@@ -70,11 +71,11 @@ Everything visitors read is in **`src/content/portfolio.ts`**: profile and bio, 
 
 ```
 src/
-  app/                    routes: / (village), /plain, OG image, icon, robots, sitemap, error, 404
+  app/                    routes: / (village), /plain, /sprites (contact sheet), OG image, icon, robots, sitemap, error, 404
   content/portfolio.ts    all portfolio content
   components/village/     VillageApp, GameCanvas (mounts the 3D world), HUD, settings, D-pad, panels
   game/                   engine-agnostic data shared with the UI
-    palette.ts            the 32-colour palette (also feeds Tailwind via CSS variables)
+    palette.ts            the 46-colour palette (also feeds Tailwind via CSS variables)
     art/                  pixel art: characters, icons, tiles, painters
     map/                  ASCII village, Tiled builder, navigation grid
     bridge.ts             typed events between the React UI and the world
@@ -82,11 +83,13 @@ src/
     VillageWorld.tsx      the <Canvas>: store, runtime, quality manager, UI events, context loss
     config/visuals.ts     every tunable (camera, sun, keyframes, lights, grades, post, tiers)
     config/assets.ts      optional model, sprite, LUT, normal map and audio paths
+    config/character.ts   the player: skin, ramps, frame size, animation timings, rim and bounce light
     store.ts              zustand store: settings, tier, camera turn, doorway
     runtime.ts            per-frame mutable state (positions, clock, input) shared by context
     world/layout.ts       heights, colliders, doorway zones and placements from the map
     scene/                World, Terrain, Water, Sky, generated assets
     entities/             procedural buildings, props, billboard characters, glTF swap-in
+    entities/Player/      player pixel data, animation state machine, atlas, sheet loader, rim shader
     lighting/             DayNightCycle, sun rig, hemisphere, pooled point lights, cones, shafts
     post/                 composer (Effects), LUT grade, Pixel mode pass
     shaders/              material patches (wind, clouds, wetness), height fog, water
@@ -94,6 +97,7 @@ src/
     systems/              input, collision, pathfinding, simulation + camera rig, audio
     settings/             QualityManager and the Auto monitor
     textures/             tileset, tiling surfaces, sprite sheet, noise
+scripts/                  export-player-sprites.ts (npm run sprites)
 tests/                    Vitest unit tests
 ```
 
@@ -137,18 +141,41 @@ export const MODEL_PATHS = { home: "/assets/models/home.glb", workshop: null /* 
 
 Models load after the first interactive frame and replace that building's procedural version. They are scaled uniformly to fit the building's footprint, centred on it and stood on the ground, so author them with +Y up and the door facing +Z. Meshes whose names contain `roof` or `front` fade out for the doorway cutaway. If a file is missing or fails to load, the procedural building stays and a warning is logged.
 
+## The player sprite
+
+Bryan is a 16×16 sprite with fair skin: a black two-block haircut (a full textured top block with a fringe over the brow, stepping in to short dark sides above the ears), a black hoodie with the hood bunched at the neck, two white drawstrings, a pocket seam and a ribbed hem, charcoal trousers and dark sneakers with a light sole line. Every black area is shaded with a four-tone cool ramp (no pure black), with a lighter outline on the upper-left. At 16 px per world unit (the density of every texture in the world, and the villagers' scale) the frame is one unit square and the character stands one unit, hair to sole. The favicon and the share image draw the same sprite.
+
+- **Pixel data:** `src/game3d/entities/Player/art.ts` holds compact part arrays (heads, torsos, hems, arms, legs, fringe tips) in a small legend that references palette names; frames are composed from them with per-frame offsets. Skin, ramps, frame size, timings and the rim and bounce light are in `src/game3d/config/character.ts`.
+- **Frames:** four directions (left is the mirror of right), each with idle (2 frames, breathing), walk (6 frames: stride, arm swing, hem sway and a one-pixel fringe bounce on footfalls) and interact (2 frames: a wave and nod, played on reaching a doorway). Footsteps sound on footfalls.
+- **Atlas:** one row per direction (down, left, right, up), one column per frame (idle 0–1, walk 0–5, interact 0–1), with a JSON frame map keyed `<direction>-<animation>/<frame>` (Aseprite's hash format). `npm run sprites` writes `player.png`, `player.json`, `portrait.png` and `palette.gpl` to `public/assets/sprites/player`; the game loads the files named in `PLAYER_SPRITES` (`src/game3d/config/assets.ts`) and draws the atlas from code if they are missing or incomplete. Re-run the export after changing the art or colours, or set both paths to `null` to always draw from code.
+- **Review:** open `/sprites` for a contact sheet with every frame at 4× and 8×, the animations playing, the sprite on grass, cobblestone, dark water and night, and the portrait.
+- **Lighting:** the billboard keeps casting an alpha-tested shadow that matches the silhouette (it turns toward the sun for the shadow pass). A capped rim light, tinted by the sun or the nearest lamp, keeps the black clothes' edges readable at night, and the nearest lamp, lantern or fire adds a faint warm bounce to the hoodie's underside. Both can be switched off in `config/character.ts`.
+- **Portrait:** a 64×64 head-and-shoulders portrait, the sprite's own pixels at 5× (with catchlights and a mouth), appears in the About panel, the HUD corner (on wider screens) and as `portrait.png`.
+
+### Swap in a hand-drawn sheet from Aseprite
+
+1. Open `public/assets/sprites/player/player.png` (or start a 16×16 sprite) and load `palette.gpl` as the palette, so the colours stay on-palette.
+2. Make one tag per direction and animation, named `down-idle`, `down-walk`, `down-interact`, `left-idle`, … `up-interact` (2, 6 and 2 frames). Keep the feet on the bottom row of each frame and the body centred.
+3. Export with **File → Export Sprite Sheet**: any layout, **JSON Data** as Hash or Array, **Item Filename** `{tag}/{tagframe}`, Tags ticked. From the command line:
+
+   ```bash
+   aseprite -b player.aseprite --sheet player.png --data player.json --format json-hash --filename-format "{tag}/{tagframe}" --list-tags --sheet-type rows
+   ```
+
+4. Put `player.png` and `player.json` in `public/` and point `PLAYER_SPRITES` at them. If a frame is missing, the console says so and the game keeps the coded sprite.
+
 ## Swap sprites, grades and normal maps
 
-- **Sprites:** set `SPRITE_SHEET_PATH` to a PNG laid out like the generated sheet (`CHARACTER_SHEET` in `src/game3d/textures/sprites.ts`): 16×16 cells, 6 columns; rows 0–3 the player facing down, left, right, up (columns 0–3 walk frames, column 4 a blink), rows 4–7 the villager, 8–11 the elder, row 12 the cat (walk, walk, sit, sleep), row 13 a bird (hop, hop, flap, flap). Feet at the bottom of each cell.
+- **Villager sprites:** set `SPRITE_SHEET_PATH` to a PNG laid out like the generated sheet (`CHARACTER_SHEET` in `src/game3d/textures/sprites.ts`): 16×16 cells, 6 columns; rows 0–3 the villager facing down, left, right, up (columns 0–3 walk frames, column 4 a blink), rows 4–7 the elder, row 8 the cat (walk, walk, sit, sleep), row 9 a bird (hop, hop, flap, flap). Feet at the bottom of each cell.
 - **Colour grades:** set `LUT_PATHS` entries to `.cube` 3D LUTs (from Resolve, Photoshop or any LUT tool). Each replaces its procedural grade.
 - **Normal maps:** map surface names (`stone`, `brick`, `roofClay`, ...) to tiling normal maps in `SURFACE_NORMAL_MAPS`, at the same 16 px per unit as the colour textures. They load after the first interactive frame.
-- **Palette:** `src/game/palette.ts` holds the 32 colours used by every texture, light, grade and the UI (as Tailwind classes such as `bg-ink`).
+- **Palette:** `src/game/palette.ts` holds the 46 colours used by every texture, sprite, light, grade and the UI (as Tailwind classes such as `bg-ink`); the last fourteen are the player's ramps.
 - **Map:** `src/game/map/village.ts` is a 40×30 character grid; the legend is in the same file. Buildings, props, spawns, water, the plaza and the forest border all come from it.
 
 ## Assets worth adding
 
 1. **Building models** (`.glb`): a stylised medieval or fantasy village pack (KayKit Medieval Hexagon / Medieval Builder, Kenney Castle Kit, Quaternius Medieval Village) for Home, Workshop, Library and Inn, plus a sci-fi or modular lab piece for the AI Lab. Name the roof and front-wall meshes for the cutaway.
-2. **Character sprite sheet**: 16×16 four-direction walk cycles in the layout above (Aseprite export, or an LPC-style base recoloured to the palette).
+2. **Sprites**: a hand-drawn version of the player atlas (Aseprite, workflow above), and the villagers redrawn with the player's ramps and selective outline.
 3. **Colour grades**: four `.cube` LUTs (dawn, day, dusk, night) graded on a screenshot of the village.
 4. **Normal maps** for stone, brick, roof tiles and planks (Laigter or Materialize can make them from the generated textures).
 5. **Sound**: footstep, door, close and UI blip clips, plus optional ambience (birds by day, crickets at night, rain).

@@ -72,11 +72,9 @@ export const MOVE = {
 } as const;
 
 export const SPRITES = {
-  /** Sprite cells are 16x16 pixels; a character billboard is one unit tall. */
+  /** Villager, cat and bird cells are 16x16 pixels, one unit tall (the player: config/character.ts). */
   cell: 16,
   walkFps: 8,
-  /** Seconds between blinks while standing still. */
-  blinkEvery: 3.2,
   /** Lighting normal of billboards (local space, +z faces the camera): tilted up a little. */
   normal: [0, 0.55, 0.84] as const,
   /** Alpha cut-off shared by the colour and shadow materials. */

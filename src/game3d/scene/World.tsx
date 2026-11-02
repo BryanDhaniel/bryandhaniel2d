@@ -9,6 +9,7 @@ import { SPRITE_SHEET_PATH, SURFACE_NORMAL_MAPS } from "@/game3d/config/assets";
 import type { SurfaceName } from "@/game3d/textures/surfaces";
 import { Buildings } from "@/game3d/entities/Buildings";
 import { Characters } from "@/game3d/entities/Characters";
+import { Player } from "@/game3d/entities/Player/Player";
 import { Props } from "@/game3d/entities/Props";
 import { Lighting } from "@/game3d/lighting/Lights";
 import { Effects } from "@/game3d/post/Effects";
@@ -161,6 +162,7 @@ export function World() {
       <Water />
       <Buildings />
       <Props />
+      <Player />
       <Characters />
       <Weather />
       <Effects />

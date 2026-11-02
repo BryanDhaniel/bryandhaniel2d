@@ -1,6 +1,6 @@
 import { ImageResponse } from "next/og";
-import { PixelSprite } from "@/components/PixelSprite";
-import { CHARACTER_LOOKS, characterFrame } from "@/game/art/characters";
+import { PixelGrid } from "@/components/PixelGrid";
+import { playerFrame } from "@/game3d/entities/Player/art";
 
 export const size = { width: 32, height: 32 };
 export const contentType = "image/png";
@@ -9,11 +9,7 @@ export const contentType = "image/png";
 export default function Icon() {
   return new ImageResponse(
     <div style={{ width: "100%", height: "100%", display: "flex" }}>
-      <PixelSprite
-        art={characterFrame(CHARACTER_LOOKS.player, "down", 0)}
-        roles={CHARACTER_LOOKS.player.roles}
-        scale={2}
-      />
+      <PixelGrid rows={playerFrame("down", "idle", 0)} scale={2} />
     </div>,
     size,
   );

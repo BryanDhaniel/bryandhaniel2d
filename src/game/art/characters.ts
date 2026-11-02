@@ -5,7 +5,7 @@ import type { PixelArt, RoleMap } from "./pixels";
  * 16x16 character templates. Digits are roles that each character recolours:
  * 1 outline · 2 hair · 3 hair highlight · 4 skin · 5 skin shade
  * 6 top · 7 top shade · 8 trousers · 9 shoes
- * Fixed palette keys are used for details: `w` hoodie strings, `k`/`m`/`g`/`v` the laptop.
+ * The fixed palette key `w` draws hoodie strings.
  *
  * A frame is head (rows 0-8) + body (rows 9-13) + legs (rows 14-15).
  */
@@ -62,7 +62,7 @@ const EYES: Record<TemplateFacing, readonly (readonly [number, number])[]> = {
   side: [[9, 6]],
 };
 
-const BODY: Record<TemplateFacing, { plain: PixelArt; hoodie: PixelArt; laptop: PixelArt }> = {
+const BODY: Record<TemplateFacing, { plain: PixelArt; hoodie: PixelArt }> = {
   down: {
     plain: [
       "....16666661....",
@@ -78,13 +78,6 @@ const BODY: Record<TemplateFacing, { plain: PixelArt; hoodie: PixelArt; laptop: 
       "...1466666641...",
       "....17666671....",
     ],
-    laptop: [
-      "....16w66w61....",
-      "...1766666671...",
-      "...14kmmmvk41...",
-      "...17kggggk71...",
-      "....17666671....",
-    ],
   },
   up: {
     plain: [
@@ -95,13 +88,6 @@ const BODY: Record<TemplateFacing, { plain: PixelArt; hoodie: PixelArt; laptop: 
       "....17666671....",
     ],
     hoodie: [
-      "....17777771....",
-      "...1766666671...",
-      "...1766666671...",
-      "...1466666641...",
-      "....17666671....",
-    ],
-    laptop: [
       "....17777771....",
       "...1766666671...",
       "...1766666671...",
@@ -124,13 +110,6 @@ const BODY: Record<TemplateFacing, { plain: PixelArt; hoodie: PixelArt; laptop: 
       "...14766661.....",
       "....1766671.....",
     ],
-    laptop: [
-      "....1666661.....",
-      "...17666661.....",
-      "...1766664kmk...",
-      "...1766666kvk...",
-      "....1766671kk...",
-    ],
   },
 };
 
@@ -150,7 +129,7 @@ const LEGS: Record<"front" | "side", readonly PixelArt[]> = {
   ],
 };
 
-export type Outfit = "plain" | "hoodie" | "laptop";
+export type Outfit = "plain" | "hoodie";
 
 export interface CharacterLook {
   roles: RoleMap;
@@ -196,21 +175,6 @@ export function characterFrame(
 }
 
 export const CHARACTER_LOOKS = {
-  /** Bryan: dark hair, blue hoodie, white sneakers, laptop with a violet sticker. */
-  player: {
-    outfit: "laptop",
-    roles: {
-      "1": "ink",
-      "2": "night",
-      "3": "slate",
-      "4": "skin",
-      "5": "sand",
-      "6": "water",
-      "7": "deep",
-      "8": "slate",
-      "9": "cloud",
-    },
-  },
   villager: {
     outfit: "plain",
     roles: {

@@ -1,6 +1,7 @@
 /**
- * The single 32-colour palette used by every texture, sprite, light, UI surface, text colour
- * and colour grade.
+ * The single 46-colour palette used by every texture, sprite, light, UI surface, text colour
+ * and colour grade. The last fourteen are the player's ramps (hair, hoodie, outline, trousers,
+ * shoes, drawstrings): near-blacks with a cool tint, so black clothing still has form.
  *
  * - Game art references colours through the one-character PIXEL_KEYS below.
  * - The HTML UI reads the same values through CSS variables (`--c-<name>`) that the root
@@ -42,6 +43,20 @@ export const PALETTE = {
   teal: "#2a9d8f",
   ochre: "#b9822f",
   frost: "#d6e6f4",
+  jet: "#0a0b10",
+  raven: "#14161f",
+  storm: "#1f2433",
+  steel: "#2e3650",
+  coal: "#0d0f15",
+  carbon: "#171b26",
+  graphite: "#242b3d",
+  pewter: "#3a4560",
+  void: "#05060a",
+  charcoal: "#20242e",
+  flint: "#2f3544",
+  soot: "#12141a",
+  silver: "#8a92a6",
+  chalk: "#c9d1e6",
 } as const;
 
 export type PaletteName = keyof typeof PALETTE;
@@ -82,6 +97,20 @@ export const PIXEL_KEYS = {
   C: "teal",
   a: "ochre",
   x: "frost",
+  j: "jet",
+  q: "raven",
+  z: "storm",
+  S: "steel",
+  K: "coal",
+  B: "carbon",
+  I: "graphite",
+  E: "pewter",
+  X: "void",
+  A: "charcoal",
+  T: "flint",
+  Z: "soot",
+  i: "silver",
+  t: "chalk",
 } as const satisfies Record<string, PaletteName>;
 
 export type PixelKey = keyof typeof PIXEL_KEYS;

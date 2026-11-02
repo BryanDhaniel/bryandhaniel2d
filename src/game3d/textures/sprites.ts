@@ -18,13 +18,13 @@ import { pixelCanvas, pixelTexture } from "./canvas";
 export const CHARACTER_SHEET = {
   cell: 16,
   columns: 6,
-  rows: 14,
+  rows: 10,
   /** First row of each person; add the facing index (down, left, right, up). */
-  people: { player: 0, villager: 4, elder: 8 } satisfies Record<CharacterId, number>,
+  people: { villager: 0, elder: 4 } satisfies Record<CharacterId, number>,
   facings: ["down", "left", "right", "up"] as const satisfies readonly Facing[],
   blinkColumn: 4,
-  cat: { row: 12, walk: [0, 1], sit: 2, sleep: 3 },
-  bird: { row: 13, hop: [0, 1], fly: [2, 3] },
+  cat: { row: 8, walk: [0, 1], sit: 2, sleep: 3 },
+  bird: { row: 9, hop: [0, 1], fly: [2, 3] },
 } as const;
 
 /** A sparrow facing right: two hopping frames and two flapping frames. */
@@ -87,7 +87,7 @@ function drawCell(
 
 export function paintCharacterSheet(ctx: CanvasRenderingContext2D): void {
   const sheet = CHARACTER_SHEET;
-  (Object.keys(sheet.people) as CharacterId[]).forEach((id) => {
+  (Object.keys(sheet.people) as (keyof typeof sheet.people)[]).forEach((id) => {
     const look = CHARACTER_LOOKS[id];
     sheet.facings.forEach((facing, facingIndex) => {
       const row = sheet.people[id] + facingIndex;

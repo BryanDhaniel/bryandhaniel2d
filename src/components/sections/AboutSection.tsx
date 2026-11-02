@@ -1,15 +1,21 @@
 import { portfolio } from "@/content/portfolio";
 import { PixelIcon } from "@/components/PixelIcon";
+import { PlayerPortrait } from "@/components/PixelGrid";
 import { Chip } from "./shared";
 
 export function AboutSection() {
   const { profile } = portfolio;
   return (
     <div className="space-y-5">
-      <div className="space-y-3 text-lg leading-relaxed">
-        {profile.bio.map((paragraph) => (
-          <p key={paragraph}>{paragraph}</p>
-        ))}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+        <div className="shrink-0 self-start border-4 border-ink shadow-pixel-sm">
+          <PlayerPortrait size={128} label={`Pixel portrait of ${profile.name}`} />
+        </div>
+        <div className="space-y-3 text-lg leading-relaxed">
+          {profile.bio.map((paragraph) => (
+            <p key={paragraph}>{paragraph}</p>
+          ))}
+        </div>
       </div>
       <dl className="grid gap-4 sm:grid-cols-2">
         <div className="border-2 border-ink bg-wheat p-3">

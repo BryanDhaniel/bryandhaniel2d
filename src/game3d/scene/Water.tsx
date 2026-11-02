@@ -166,11 +166,12 @@ export function Water() {
     if (basin.current) basin.current.visible = false;
     const autoUpdate = gl.shadowMap.autoUpdate;
     gl.shadowMap.autoUpdate = false;
-    const previous = gl.getRenderTarget();
     gl.setRenderTarget(reflection.target);
     gl.clear();
     gl.render(scene, mirror);
-    gl.setRenderTarget(previous);
+    // Back to the default target: the frame's real render (or the composer) sets its own, and
+    // a target left over from a rebuilt composer may already be disposed.
+    gl.setRenderTarget(null);
     gl.shadowMap.autoUpdate = autoUpdate;
     if (pond.current) pond.current.visible = true;
     if (basin.current) basin.current.visible = true;

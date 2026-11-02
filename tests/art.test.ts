@@ -15,14 +15,14 @@ import { tileUv } from "@/game3d/textures/tileset";
 import { PALETTE, PALETTE_NAMES, PIXEL_KEYS } from "@/game/palette";
 
 describe("palette", () => {
-  it("has exactly 32 unique colours", () => {
-    expect(PALETTE_NAMES).toHaveLength(32);
-    expect(new Set(Object.values(PALETTE)).size).toBe(32);
+  it("has exactly 46 unique colours", () => {
+    expect(PALETTE_NAMES).toHaveLength(46);
+    expect(new Set(Object.values(PALETTE)).size).toBe(46);
   });
 
   it("gives every colour exactly one pixel key", () => {
     const mapped = Object.values(PIXEL_KEYS);
-    expect(mapped).toHaveLength(32);
+    expect(mapped).toHaveLength(46);
     expect(new Set(mapped)).toEqual(new Set(PALETTE_NAMES));
   });
 
@@ -63,7 +63,7 @@ describe("pixel art", () => {
   });
 
   it("blink frames differ from the open-eyed pose where a face is visible", () => {
-    const look = CHARACTER_LOOKS.player;
+    const look = CHARACTER_LOOKS.villager;
     expect(characterFrame(look, "down", 0, true)).not.toEqual(characterFrame(look, "down", 0));
     expect(characterFrame(look, "up", 0, true)).toEqual(characterFrame(look, "up", 0));
   });

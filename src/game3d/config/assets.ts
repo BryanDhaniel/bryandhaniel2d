@@ -26,8 +26,19 @@ export const MODEL_PATHS: Record<BuildingId, string | null> = {
 };
 
 /**
- * Character sprite sheet, e.g. "/assets/sprites/characters.png": 16x16 cells laid out like the
- * generated sheet (see CHARACTER_SHEET in textures/sprites.ts). Nearest-filtered.
+ * The player's sprite atlas: a PNG plus an Aseprite-style JSON frame map (16x16 frames named
+ * `<direction>-<animation>/<frame>`, see entities/Player/atlas.ts). These point at the files
+ * `npm run sprites` exports; replace them with a hand-drawn sheet, or set both to null to
+ * always draw the player from code. Missing or incomplete files fall back to the code.
+ */
+export const PLAYER_SPRITES: { image: string | null; atlas: string | null } = {
+  image: "/assets/sprites/player/player.png",
+  atlas: "/assets/sprites/player/player.json",
+};
+
+/**
+ * Sheet for the villagers, the cat and birds, e.g. "/assets/sprites/characters.png": 16x16
+ * cells laid out like the generated sheet (see CHARACTER_SHEET in textures/sprites.ts).
  */
 export const SPRITE_SHEET_PATH: string | null = null;
 

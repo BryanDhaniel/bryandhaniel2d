@@ -1,8 +1,8 @@
 import { ImageResponse } from "next/og";
 import { portfolio } from "@/content/portfolio";
-import { PixelSprite } from "@/components/PixelSprite";
-import { CHARACTER_LOOKS, characterFrame } from "@/game/art/characters";
+import { PixelGrid } from "@/components/PixelGrid";
 import { PALETTE } from "@/game/palette";
+import { playerFrame } from "@/game3d/entities/Player/art";
 
 export const alt = `${portfolio.profile.name} (${portfolio.profile.alias}), ${portfolio.profile.roles.join(" and ")}`;
 export const size = { width: 1200, height: 630 };
@@ -33,11 +33,7 @@ export default function OpenGraphImage() {
           boxShadow: `16px 16px 0 0 ${PALETTE.ink}`,
         }}
       >
-        <PixelSprite
-          art={characterFrame(CHARACTER_LOOKS.player, "down", 0)}
-          roles={CHARACTER_LOOKS.player.roles}
-          scale={18}
-        />
+        <PixelGrid rows={playerFrame("down", "idle", 0)} scale={18} />
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
         <div

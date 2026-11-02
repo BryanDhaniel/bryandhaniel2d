@@ -46,7 +46,6 @@ export function Simulation() {
       turn: { from: BASE_YAW, to: BASE_YAW, t: 1 },
       lastTurn: 0,
       zoomApplied: 0,
-      stepFrame: -1,
     }),
     [],
   );
@@ -171,10 +170,6 @@ export function Simulation() {
         scratch.moved = true;
         bridge.emit("moved", null);
       }
-      // Footsteps on alternate walk frames.
-      const frame = Math.floor(runtime.elapsed * 8 * (run ? 1.5 : 1)) % 4;
-      if (frame !== scratch.stepFrame && frame % 2 === 1) runtime.audio.play("step");
-      scratch.stepFrame = frame;
     }
     const ground = groundHeight(layout, player.x, player.z);
     player.y += (ground - player.y) * (1 - Math.exp(-MOVE.heightRate * delta));

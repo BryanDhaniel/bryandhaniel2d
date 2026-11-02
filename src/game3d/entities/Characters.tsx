@@ -65,7 +65,7 @@ interface Bird {
 
 const WANDER_RADIUS: Record<NpcKind, number> = { villager: 4, elder: 3, cat: 5 };
 
-/** The player, villagers, the cat and birds, all as pixel billboards. */
+/** Villagers, the cat and birds, all as pixel billboards (the player has its own component). */
 export function Characters() {
   const runtime = useRuntime();
   const assets = useAssets();
@@ -75,7 +75,6 @@ export function Characters() {
   const cast = useMemo(() => {
     const { layout } = runtime;
     const finder = new GridPathfinder(layout.width, layout.height, layout.npcWalkable);
-    const player = new Billboard(assets.sheet, runtime.uniforms);
     const walkers: Walker[] = layout.spawns
       .filter((spawn): spawn is { kind: NpcKind; x: number; z: number } => spawn.kind !== "player")
       .map((spawn, index) => ({
@@ -96,7 +95,7 @@ export function Characters() {
         lastSide: 1,
       }));
     const birds: Bird[] = layout.birdSpots.map((spot, index) => ({
-      billboard: new Billboard(assets.sheet, runtime.uniforms, 0.6),
+      billboard: new Billboard(assets.sheet, runtime.uniforms, { width: 0.6, height: 0.6 }),
       x: spot.x,
       y: groundHeight(layout, spot.x, spot.z),
       z: spot.z,
@@ -111,12 +110,11 @@ export function Characters() {
       flyT: 0,
       side: 1,
     }));
-    return { player, walkers, birds, finder, steer: { x: 0, z: 0 } };
+    return { walkers, birds, finder, steer: { x: 0, z: 0 } };
   }, [runtime, assets]);
 
   useEffect(
     () => () => {
-      cast.player.dispose();
       cast.walkers.forEach((walker) => walker.billboard.dispose());
       cast.birds.forEach((bird) => bird.billboard.dispose());
     },
@@ -125,7 +123,6 @@ export function Characters() {
 
   useEffect(() => {
     for (const billboard of [
-      cast.player,
       ...cast.walkers.map((w) => w.billboard),
       ...cast.birds.map((b) => b.billboard),
     ]) {
@@ -140,19 +137,6 @@ export function Characters() {
     const sun = runtime.cycle.state.sunDirection;
     const sunYaw = Math.atan2(sun[0] ?? 0, sun[2] ?? 1);
     const time = runtime.elapsed;
-
-    // Player: walk cycle while moving, a blink now and then while standing.
-    const p = cast.player;
-    p.sunYaw = sunYaw;
-    p.place(player.x, player.y, player.z, yaw);
-    const row = CHARACTER_SHEET.people.player + facingRow(player.facing);
-    if (player.moving) {
-      const fps = SPRITES.walkFps * (player.running ? 1.5 : 1);
-      p.setFrame(row, Math.floor(time * fps) % 4);
-    } else {
-      const blink = time % SPRITES.blinkEvery < 0.14;
-      p.setFrame(row, blink ? CHARACTER_SHEET.blinkColumn : 0);
-    }
 
     // Villagers and the cat wander between idle pauses, never into doorways.
     for (const walker of cast.walkers) {
@@ -278,8 +262,6 @@ export function Characters() {
 
   return (
     <group>
-      <primitive object={cast.player.mesh} />
-      <primitive object={cast.player.blob} />
       {cast.walkers.map((walker) => (
         <group key={walker.billboard.mesh.uuid}>
           <primitive object={walker.billboard.mesh} />
