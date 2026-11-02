@@ -6,6 +6,8 @@ import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from
 import { getSection, portfolio, type SectionId } from "@/content/portfolio";
 import { GameBridge, type GameToUiEvents, type MapInfo } from "@/game/bridge";
 import type {
+  CameraMode,
+  CameraOptions,
   DayPhase,
   QualityLevel,
   QualitySetting,
@@ -16,22 +18,33 @@ import { AUDIO_SOURCES } from "@/game3d/config/assets";
 import { AudioSystem } from "@/game3d/systems/audio";
 import { useCapabilities } from "@/lib/capabilities";
 import { useMediaQuery, useStoredValue } from "@/lib/hooks";
-import { defaultQualityFor, storedQuality, storedTimeMode, storedWeather } from "@/lib/settings";
+import {
+  defaultQualityFor,
+  storedCameraMode,
+  storedQuality,
+  storedTimeMode,
+  storedWeather,
+} from "@/lib/settings";
 import { STORAGE_KEYS, writeFlag, writeStorage } from "@/lib/storage";
 import { ControlsHint } from "./ControlsHint";
+import { DebugPanel } from "./DebugPanel";
 import { DPad } from "./DPad";
 import { GameErrorBoundary } from "./GameErrorBoundary";
 import { Hud } from "./Hud";
 import { InteractionPrompt } from "./InteractionPrompt";
+import { Joystick } from "./Joystick";
 import { LoadingScreen } from "./LoadingScreen";
 import { GameErrorNotice, LowFpsToast, PlainViewOffer, WebGLFallback } from "./Notices";
 import { SectionPanel } from "./SectionPanel";
+import { Waypoints } from "./Waypoints";
 
 // three.js and the 3D world are only ever downloaded and run in the browser, on this route.
 const GameCanvas = dynamic(() => import("./GameCanvas"), { ssr: false });
 
 const INITIAL_PROGRESS = { value: 0.08, label: "Packing the engine" };
 const DEFAULT_LOCATION = "Kiznaiver's Village";
+/** Quick travel: fade to black, jump, fade back (milliseconds). */
+const TRAVEL_FADE_MS = 220;
 
 type Fatal = GameToUiEvents["fatal"];
 type Near = { sectionId: SectionId; label: string };
@@ -51,6 +64,12 @@ export function VillageApp() {
   const pixelMode = useStoredValue("local", STORAGE_KEYS.pixelMode) === "1";
   const grain = useStoredValue("local", STORAGE_KEYS.grain) === "1";
   const aberration = useStoredValue("local", STORAGE_KEYS.aberration) === "1";
+  const cameraMode = storedCameraMode(useStoredValue("local", STORAGE_KEYS.cameraMode));
+  const invertY = useStoredValue("local", STORAGE_KEYS.invertY) === "1";
+  const autoRecenter = useStoredValue("local", STORAGE_KEYS.autoRecenter) !== "0";
+  const pointerLock = useStoredValue("local", STORAGE_KEYS.pointerLock) === "1";
+  const jump = useStoredValue("local", STORAGE_KEYS.jump) === "1";
+  const cameraOptions: CameraOptions = { invertY, autoRecenter, pointerLock, jump };
 
   const [bridge] = useState(() => new GameBridge());
   const [audio] = useState(() => new AudioSystem(AUDIO_SOURCES));
@@ -64,6 +83,8 @@ export function VillageApp() {
   const [lowFps, setLowFps] = useState(false);
   const [phase, setPhase] = useState<DayPhase | null>(null);
   const [qualityLevel, setQualityLevel] = useState<QualityLevel | null>(null);
+  const [fading, setFading] = useState(false);
+  const [debugOpen, setDebugOpen] = useState(false);
   const gameRef = useRef<HTMLDivElement>(null);
   const hintId = useId();
 
@@ -96,10 +117,24 @@ export function VillageApp() {
       bridge.on("lowFps", () => setLowFps(true)),
       bridge.on("clock", (next) => setPhase(next.phase)),
       bridge.on("qualityLevel", (next) => setQualityLevel(next.level)),
+      // V or a gamepad switched the view inside the game: remember it.
+      bridge.on("cameraMode", ({ mode }) => writeStorage("local", STORAGE_KEYS.cameraMode, mode)),
       bridge.on("fatal", (next) => setFatal(next)),
     ];
     return () => subscriptions.forEach((off) => off());
   }, [bridge, audio, focusGame]);
+
+  // The backquote key toggles the camera debug panel (not while typing in a field).
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.code !== "Backquote" || event.repeat) return;
+      const target = event.target;
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return;
+      setDebugOpen((open) => !open);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   // Browsers only allow audio after a gesture: open the AudioContext on the first one.
   useEffect(() => {
@@ -180,6 +215,41 @@ export function VillageApp() {
     focusGame();
   };
 
+  const changeCameraMode = (mode: CameraMode) => {
+    writeStorage("local", STORAGE_KEYS.cameraMode, mode);
+    bridge.emit("setCameraMode", { mode });
+    audio.play("blip");
+    focusGame();
+  };
+
+  const changeCameraOptions = (next: CameraOptions) => {
+    writeFlag("local", STORAGE_KEYS.invertY, next.invertY);
+    writeFlag("local", STORAGE_KEYS.autoRecenter, next.autoRecenter);
+    writeFlag("local", STORAGE_KEYS.pointerLock, next.pointerLock);
+    writeFlag("local", STORAGE_KEYS.jump, next.jump);
+    bridge.emit("setCameraOptions", next);
+    audio.play("blip");
+  };
+
+  const resetCamera = () => {
+    bridge.emit("resetCamera", null);
+    focusGame();
+  };
+
+  // Quick travel covers the jump with a short fade (none with reduced motion).
+  const quickTravel = (sectionId: SectionId) => {
+    focusGame();
+    if (reducedMotion) {
+      bridge.emit("teleport", { sectionId });
+      return;
+    }
+    setFading(true);
+    window.setTimeout(() => {
+      bridge.emit("teleport", { sectionId });
+      window.setTimeout(() => setFading(false), 80);
+    }, TRAVEL_FADE_MS);
+  };
+
   const playVillageAnyway = () => writeFlag("session", STORAGE_KEYS.playAnyway, true);
 
   const heading = (
@@ -258,10 +328,32 @@ export function VillageApp() {
             onWeather: changeWeather,
             onQuality: changeQuality,
             onVisualOptions: changeVisualOptions,
+            camera: cameraOptions,
+            onCameraOptions: changeCameraOptions,
           }}
+          cameraMode={cameraMode}
+          onCameraMode={changeCameraMode}
+          onResetCamera={resetCamera}
+          onQuickTravel={quickTravel}
           onToggleMute={toggleMute}
           onTravel={travel}
         />
+
+        {mapInfo ? (
+          <Waypoints
+            bridge={bridge}
+            markers={mapInfo.markers}
+            hidden={panelOpen || cameraMode !== "thirdPerson"}
+          />
+        ) : null}
+
+        {cameraMode === "thirdPerson" && near && !panelOpen ? (
+          // A quiet centre reticle, only while something can be used.
+          <span
+            aria-hidden="true"
+            className="pointer-events-none absolute top-1/2 left-1/2 z-20 -mt-1 -ml-1 size-2 border border-ink bg-gold/90"
+          />
+        ) : null}
 
         <InteractionPrompt
           bridge={bridge}
@@ -273,8 +365,26 @@ export function VillageApp() {
           }}
         />
 
-        <ControlsHint id={hintId} visible={ready && !moved && !panelOpen} touch={touch} />
-        {touch && ready ? <DPad bridge={bridge} canInteract={near !== null && !panelOpen} /> : null}
+        <ControlsHint
+          id={hintId}
+          visible={ready && !moved && !panelOpen}
+          touch={touch}
+          mode={cameraMode}
+        />
+        {touch && ready && cameraMode === "thirdPerson" ? (
+          <Joystick bridge={bridge} canInteract={near !== null && !panelOpen} />
+        ) : null}
+        {touch && ready && cameraMode !== "thirdPerson" ? (
+          <DPad bridge={bridge} canInteract={near !== null && !panelOpen} />
+        ) : null}
+
+        <div
+          aria-hidden="true"
+          className={`pointer-events-none absolute inset-0 z-30 bg-ink transition-opacity duration-200 ${fading ? "opacity-100" : "opacity-0"}`}
+        />
+        {debugOpen && ready ? (
+          <DebugPanel bridge={bridge} onClose={() => setDebugOpen(false)} />
+        ) : null}
 
         <AnimatePresence>
           {openSection ? (

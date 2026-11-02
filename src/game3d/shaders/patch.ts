@@ -14,6 +14,8 @@ export interface WorldUniforms {
   /** Amplitude, speed and gust strength of the wind. */
   uWind: { value: THREE.Vector3 };
   uWetness: { value: number };
+  /** Distance (from the camera) where fading props start to shrink away, and where they are gone. */
+  uFadeRange: { value: THREE.Vector2 };
 }
 
 export function createWorldUniforms(): WorldUniforms {
@@ -25,6 +27,7 @@ export function createWorldUniforms(): WorldUniforms {
     uCloudStrength: { value: 0 },
     uWind: { value: new THREE.Vector3(WIND.amplitude, WIND.speed, WIND.gust) },
     uWetness: { value: 0 },
+    uFadeRange: { value: new THREE.Vector2(1e4, 1e4 + 1) },
   };
 }
 
@@ -42,11 +45,14 @@ export interface PatchOptions {
   wet?: boolean;
   /** Camera-facing sprites: light them with a fixed upward-tilted normal. */
   billboard?: boolean;
+  /** Shrinks into the ground with distance from the camera (grass and flowers). */
+  fade?: boolean;
 }
 
 const VERTEX_HEAD = /* glsl */ `
 uniform float uTime;
 uniform vec3 uWind;
+uniform vec2 uFadeRange;
 varying vec2 vVillageXZ;
 varying float vVillageUp;
 `;
@@ -59,6 +65,17 @@ uniform float uCloudStrength;
 uniform float uWetness;
 varying vec2 vVillageXZ;
 varying float vVillageUp;
+`;
+
+const FADE_CODE = /* glsl */ `
+#ifdef VILLAGE_FADE
+  vec3 fadeBase = modelMatrix[3].xyz;
+  #ifdef USE_INSTANCING
+    fadeBase += instanceMatrix[3].xyz;
+  #endif
+  float fadeKeep = 1.0 - smoothstep(uFadeRange.x, uFadeRange.y, distance(fadeBase, cameraPosition));
+  transformed *= fadeKeep;
+#endif
 `;
 
 const WIND_CODE = /* glsl */ `
@@ -145,12 +162,18 @@ export function patchMaterial<T extends THREE.MeshStandardMaterial | THREE.MeshL
   if (options.clouds) defines.VILLAGE_CLOUDS = "";
   if (options.wet) defines.VILLAGE_WET = "";
   if (options.billboard) defines.VILLAGE_BILLBOARD = "";
+  if (options.fade) defines.VILLAGE_FADE = "";
   material.defines = defines;
   material.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
     let vertex = `${VERTEX_HEAD}\n${shader.vertexShader}`;
     vertex = inject(vertex, "#include <beginnormal_vertex>", BILLBOARD_NORMAL);
-    vertex = inject(vertex, "#include <begin_vertex>", WIND_CODE);
+    vertex = inject(
+      vertex,
+      "#include <begin_vertex>",
+      `${FADE_CODE}
+${WIND_CODE}`,
+    );
     vertex = inject(vertex, "#include <project_vertex>", WORLD_CODE);
     shader.vertexShader = vertex;
     let fragment = `${FRAGMENT_HEAD}\n${shader.fragmentShader}`;
@@ -161,7 +184,7 @@ export function patchMaterial<T extends THREE.MeshStandardMaterial | THREE.MeshL
     fragment = inject(fragment, "#include <lights_fragment_end>", CLOUD_CODE);
     shader.fragmentShader = fragment;
   };
-  const key = `village:${options.wind ?? "-"}:${options.clouds ? 1 : 0}:${options.wet ? 1 : 0}:${options.billboard ? 1 : 0}`;
+  const key = `village:${options.wind ?? "-"}:${options.clouds ? 1 : 0}:${options.wet ? 1 : 0}:${options.billboard ? 1 : 0}:${options.fade ? 1 : 0}`;
   material.customProgramCacheKey = () => key;
   return material;
 }

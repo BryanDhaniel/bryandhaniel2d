@@ -1,6 +1,7 @@
 import { CHARACTER } from "@/game3d/config/character";
 import {
   ANIMATIONS,
+  CARDINAL_DIRECTIONS,
   DIRECTIONS,
   FRAME_COUNTS,
   FRAME_HEIGHT,
@@ -12,10 +13,10 @@ import {
 } from "./art";
 
 /**
- * The player atlas: one row per direction (down, left, right, up) and one column per frame
- * (idle 0-1, walk 0-5, interact 0-1), described by an Aseprite-style JSON frame map whose
- * keys are `<direction>-<animation>/<frame>`. Pure: the game, the export script and the
- * contact sheet all build the same pixels.
+ * The player atlas: one row per direction (down, left, right, up, then the four three-quarter
+ * views) and one column per frame (idle 0-1, walk 0-5, interact 0-1), described by an
+ * Aseprite-style JSON frame map whose keys are `<direction>-<animation>/<frame>`. Pure: the
+ * game, the export script and the contact sheet all build the same pixels.
  */
 
 export interface AtlasRect {
@@ -66,9 +67,14 @@ export function atlasFrames(): AtlasFrame[] {
   return frames;
 }
 
-/** Every frame name the game needs from a sprite sheet. */
+/**
+ * Every frame name a sprite sheet must have: the four main directions. The three-quarter
+ * views are optional; a sheet without them gets them composed from the main ones.
+ */
 export function requiredFrameNames(): string[] {
-  return atlasFrames().map((frame) => frame.name);
+  return atlasFrames()
+    .filter((frame) => CARDINAL_DIRECTIONS.includes(frame.direction))
+    .map((frame) => frame.name);
 }
 
 /** The atlas as RGBA pixels (row-major, top row first). */

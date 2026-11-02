@@ -209,6 +209,58 @@ export const ICONS = {
     "...kkkk...",
     "..........",
   ],
+  /** Third-person view: a figure seen from behind. */
+  person: [
+    "...kkkk...",
+    "..kwwwwk..",
+    "..kwwwwk..",
+    "...kkkk...",
+    "..keeeek..",
+    ".keeeeeek.",
+    ".keeeeeek.",
+    "..keeeek..",
+    "..kk..kk..",
+    "..........",
+  ],
+  /** Isometric view: a diamond tile. */
+  map: [
+    "....kk....",
+    "...kwwk...",
+    "..kwwwwk..",
+    ".kwwkkwwk.",
+    "kwwk..kwwk",
+    ".kwwkkwwk.",
+    "..kwwwwk..",
+    "...kwwk...",
+    "....kk....",
+    "..........",
+  ],
+  /** Reset the camera: a crosshair. */
+  recenter: [
+    "....kk....",
+    "..kkwwkk..",
+    ".kwwkkwwk.",
+    ".kwk..kwk.",
+    "kwk.kk.kwk",
+    "kwk.kk.kwk",
+    ".kwk..kwk.",
+    ".kwwkkwwk.",
+    "..kkwwkk..",
+    "....kk....",
+  ],
+  /** Run toggle: a double chevron. */
+  run: [
+    "..........",
+    "k...k.....",
+    "kk..kk....",
+    ".kk..kk...",
+    "..kk..kk..",
+    "..kk..kk..",
+    ".kk..kk...",
+    "kk..kk....",
+    "k...k.....",
+    "..........",
+  ],
 } as const satisfies Record<string, PixelArt>;
 
 export type IconName = keyof typeof ICONS;

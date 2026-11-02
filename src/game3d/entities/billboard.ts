@@ -25,6 +25,16 @@ function blobMap(): THREE.CanvasTexture {
   return blobTexture;
 }
 
+function applyRect(
+  texture: THREE.Texture,
+  rect: AtlasRect,
+  sheetWidth: number,
+  sheetHeight: number,
+) {
+  texture.repeat.set(rect.w / sheetWidth, rect.h / sheetHeight);
+  texture.offset.set(rect.x / sheetWidth, 1 - (rect.y + rect.h) / sheetHeight);
+}
+
 export interface BillboardOptions {
   /** World size of the quad (the sprite cell at 16 px per unit). */
   width?: number;
@@ -36,16 +46,19 @@ export interface BillboardOptions {
 }
 
 /**
- * A camera-facing pixel sprite in the 3D scene. It stands upright and turns with the camera
- * (Y-axis billboard) so it never leans. For shadow maps it briefly turns to face the sun and
- * renders through depth materials that share its texture and alpha cut-off, so the shadow is
- * the sprite's exact silhouette whatever the camera angle.
+ * A camera-facing pixel sprite in the 3D scene. It stands upright and turns around Y only, so
+ * it never leans whatever the camera's pitch. It is opaque with an alpha cut-off (depth-written,
+ * so it never needs transparency sorting), drawn with nearest filtering. For shadow maps it
+ * briefly turns to face the sun and renders through depth materials with the same cut-off;
+ * they read their own copy of the sheet, so the shadow can show the frame the sun would see
+ * (a side profile when the camera sees the back).
  */
 export class Billboard {
   readonly mesh: THREE.Mesh;
   readonly blob: THREE.Mesh;
   private readonly geometry: THREE.PlaneGeometry;
   private texture: THREE.Texture;
+  private shadowTexture: THREE.Texture;
   private readonly material: THREE.MeshStandardMaterial;
   private readonly depth: THREE.MeshDepthMaterial;
   private readonly distance: THREE.MeshDistanceMaterial;
@@ -63,6 +76,7 @@ export class Billboard {
     this.geometry = new THREE.PlaneGeometry(width, height).translate(0, height / 2, 0);
     this.texture = sheet.clone();
     this.texture.repeat.set(1 / this.grid.columns, 1 / this.grid.rows);
+    this.shadowTexture = this.texture.clone();
     this.sourceVersion = this.texture.source.version;
     this.material = patchMaterial(
       new THREE.MeshStandardMaterial({
@@ -78,11 +92,11 @@ export class Billboard {
     options.extend?.(this.material);
     this.depth = new THREE.MeshDepthMaterial({
       depthPacking: THREE.RGBADepthPacking,
-      map: this.texture,
+      map: this.shadowTexture,
       alphaTest: SPRITES.alphaTest,
     });
     this.distance = new THREE.MeshDistanceMaterial({
-      map: this.texture,
+      map: this.shadowTexture,
       alphaTest: SPRITES.alphaTest,
     });
     this.mesh = new THREE.Mesh(this.geometry, this.material);
@@ -116,8 +130,13 @@ export class Billboard {
   /** Shows a grid cell; `flip` mirrors it horizontally. */
   setFrame(row: number, column: number, flip = false): void {
     const { columns, rows } = this.grid;
-    this.texture.repeat.set((flip ? -1 : 1) / columns, 1 / rows);
-    this.texture.offset.set((column + (flip ? 1 : 0)) / columns, 1 - (row + 1) / rows);
+    const repeatX = (flip ? -1 : 1) / columns;
+    const offsetX = (column + (flip ? 1 : 0)) / columns;
+    const offsetY = 1 - (row + 1) / rows;
+    this.texture.repeat.set(repeatX, 1 / rows);
+    this.texture.offset.set(offsetX, offsetY);
+    this.shadowTexture.repeat.set(repeatX, 1 / rows);
+    this.shadowTexture.offset.set(offsetX, offsetY);
   }
 
   /** Switches to another sheet texture (a sprite file replacing the generated one). */
@@ -125,24 +144,35 @@ export class Billboard {
     const next = sheet.clone();
     next.repeat.copy(this.texture.repeat);
     next.offset.copy(this.texture.offset);
+    const shadow = sheet.clone();
+    shadow.repeat.copy(this.shadowTexture.repeat);
+    shadow.offset.copy(this.shadowTexture.offset);
     this.material.map = next;
-    this.depth.map = next;
-    this.distance.map = next;
+    this.depth.map = shadow;
+    this.distance.map = shadow;
     this.texture.dispose();
+    this.shadowTexture.dispose();
     this.texture = next;
+    this.shadowTexture = shadow;
     this.sourceVersion = next.source.version;
   }
 
   /** Shows a rectangle (in pixels, top-left origin) of a sheet of the given size. */
   setRect(rect: AtlasRect, sheetWidth: number, sheetHeight: number): void {
-    this.texture.repeat.set(rect.w / sheetWidth, rect.h / sheetHeight);
-    this.texture.offset.set(rect.x / sheetWidth, 1 - (rect.y + rect.h) / sheetHeight);
+    applyRect(this.texture, rect, sheetWidth, sheetHeight);
+    applyRect(this.shadowTexture, rect, sheetWidth, sheetHeight);
+  }
+
+  /** The frame the shadow uses, when it differs from what the camera sees (call after setRect). */
+  setShadowRect(rect: AtlasRect, sheetWidth: number, sheetHeight: number): void {
+    applyRect(this.shadowTexture, rect, sheetWidth, sheetHeight);
   }
 
   place(x: number, y: number, z: number, yaw: number): void {
     // The sheet's image was replaced (a sprite file loaded): this copy re-uploads it too.
     if (this.texture.source.version !== this.sourceVersion) {
       this.texture.needsUpdate = true;
+      this.shadowTexture.needsUpdate = true;
       this.sourceVersion = this.texture.source.version;
     }
     this.yaw = yaw;
@@ -159,6 +189,7 @@ export class Billboard {
   dispose(): void {
     this.geometry.dispose();
     this.texture.dispose();
+    this.shadowTexture.dispose();
     this.material.dispose();
     this.depth.dispose();
     this.distance.dispose();

@@ -5,6 +5,7 @@ import { CHARACTER, PLAYER_SIZE } from "@/game3d/config/character";
 import { PlayerAnimator } from "@/game3d/entities/Player/animation";
 import {
   ANIMATIONS,
+  CARDINAL_DIRECTIONS,
   DIRECTIONS,
   FRAME_COUNTS,
   FRAME_HEIGHT,
@@ -13,6 +14,7 @@ import {
   PARTS,
   PORTRAIT_SIZE,
   TRANSPARENT,
+  directionFor,
   inkHex,
   mirror,
   playerFrame,
@@ -56,9 +58,9 @@ describe("player pixel data", () => {
     }
   });
 
-  it("composes 40 frames of 16x16", () => {
+  it("composes 80 frames of 16x16 (eight directions)", () => {
     expect([FRAME_WIDTH, FRAME_HEIGHT]).toEqual([16, 16]);
-    expect(allFrames).toHaveLength(40);
+    expect(allFrames).toHaveLength(80);
     for (const frame of allFrames) {
       expect(frame.rows).toHaveLength(FRAME_HEIGHT);
       for (const row of frame.rows) expect(row).toHaveLength(FRAME_WIDTH);
@@ -77,26 +79,61 @@ describe("player pixel data", () => {
     expect(PLAYER_SIZE).toEqual({ width: 1, height: 1 });
   });
 
-  it("mirrors the right-facing frames for left", () => {
-    for (const animation of ANIMATIONS) {
-      for (let index = 0; index < FRAME_COUNTS[animation]; index += 1) {
-        expect(playerFrame("left", animation, index)).toEqual(
-          mirror(playerFrame("right", animation, index)),
-        );
+  it("mirrors the right-facing frames for left, including the three-quarter views", () => {
+    const pairs = [
+      ["left", "right"],
+      ["down-left", "down-right"],
+      ["up-left", "up-right"],
+    ] as const;
+    for (const [left, right] of pairs) {
+      for (const animation of ANIMATIONS) {
+        for (let index = 0; index < FRAME_COUNTS[animation]; index += 1) {
+          expect(playerFrame(left, animation, index)).toEqual(
+            mirror(playerFrame(right, animation, index)),
+          );
+        }
       }
+    }
+  });
+
+  it("picks the direction from the heading relative to the viewer", () => {
+    expect(directionFor(0)).toBe("up");
+    expect(directionFor(Math.PI)).toBe("down");
+    expect(directionFor(-Math.PI)).toBe("down");
+    expect(directionFor(-Math.PI / 2)).toBe("right");
+    expect(directionFor(Math.PI / 2)).toBe("left");
+    expect(directionFor(-Math.PI / 4)).toBe("up-right");
+    expect(directionFor((3 * Math.PI) / 4)).toBe("down-left");
+    expect(directionFor(0.3)).toBe("up");
+  });
+
+  it("bounces the hair's top block on footfalls in the back views", () => {
+    for (const direction of ["up", "up-right"] as const) {
+      const passing = playerFrame(direction, "walk", 1);
+      const footfall = playerFrame(direction, "walk", 0);
+      // The body drops a pixel on the footfall, yet the top block still reaches the top row.
+      expect(footfall[8]).not.toEqual(passing[8]);
+      expect([...(footfall[0] ?? "")].some((char) => char !== TRANSPARENT)).toBe(true);
     }
   });
 
   it("never uses pure black, and shades the black areas with several tones", () => {
     for (const char of Object.keys(LEGEND)) expect(inkHex(char)).not.toBe("#000000");
-    for (const head of [PARTS.headDown, PARTS.headUp, PARTS.headSide]) {
+    const heads = [
+      PARTS.headDown,
+      PARTS.headUp,
+      PARTS.headSide,
+      PARTS.headDownSide,
+      PARTS.headUpSide,
+    ];
+    for (const head of heads) {
       expect(used(head, "1234").size).toBeGreaterThanOrEqual(3);
     }
     for (const torso of [PARTS.torsoDown, PARTS.torsoUp, PARTS.torsoSide]) {
       expect(used(torso, "abcd").size).toBeGreaterThanOrEqual(3);
     }
     // The cool sheen stays on the top block (the first four rows of each head).
-    for (const head of [PARTS.headDown, PARTS.headUp, PARTS.headSide]) {
+    for (const head of heads) {
       expect(used(head.slice(4), "4").size).toBe(0);
     }
   });
@@ -133,11 +170,11 @@ describe("player pixel data", () => {
 describe("player atlas", () => {
   it("lays out one row per direction and one column per frame", () => {
     const frames = atlasFrames();
-    expect(frames).toHaveLength(40);
+    expect(frames).toHaveLength(80);
     expect(ATLAS_WIDTH).toBe(10 * FRAME_WIDTH);
-    expect(ATLAS_HEIGHT).toBe(4 * FRAME_HEIGHT);
+    expect(ATLAS_HEIGHT).toBe(8 * FRAME_HEIGHT);
     const keys = new Set(frames.map((frame) => `${frame.x},${frame.y}`));
-    expect(keys.size).toBe(40);
+    expect(keys.size).toBe(80);
     for (const frame of frames) {
       expect(frame.x + frame.w).toBeLessThanOrEqual(ATLAS_WIDTH);
       expect(frame.y + frame.h).toBeLessThanOrEqual(ATLAS_HEIGHT);
@@ -146,14 +183,27 @@ describe("player atlas", () => {
 
   it("round-trips its JSON frame map and reads Aseprite's array format", () => {
     const json = atlasJson("player.png");
-    expect(parseAtlasJson(json)?.size).toBe(40);
+    expect(parseAtlasJson(json)?.size).toBe(80);
     const array = {
       frames: Object.entries(json.frames).map(([name, entry]) => ({
         filename: `${name}.png`,
         ...entry,
       })),
     };
-    expect(parseAtlasJson(array)?.size).toBe(40);
+    expect(parseAtlasJson(array)?.size).toBe(80);
+    // A four-direction sheet is enough: the three-quarter views are composed at load time.
+    const cardinal = {
+      frames: Object.fromEntries(
+        Object.entries(json.frames).filter(([name]) =>
+          CARDINAL_DIRECTIONS.some(
+            (direction) =>
+              name.startsWith(`${direction}-`) && !/^(down|up)-(left|right)/.test(name),
+          ),
+        ),
+      ),
+    };
+    expect(requiredFrameNames()).toHaveLength(40);
+    expect(parseAtlasJson(cardinal)?.size).toBe(40);
     const missing = { frames: { ...json.frames } };
     delete missing.frames[requiredFrameNames()[5] ?? ""];
     expect(parseAtlasJson(missing)).toBeNull();

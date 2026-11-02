@@ -4,14 +4,14 @@ import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
 import { useStore } from "zustand";
-import { QUALITY_TIERS, WATER, WORLD } from "@/game3d/config/visuals";
+import { HORIZON, QUALITY_TIERS, WATER, WORLD } from "@/game3d/config/visuals";
 import { useRuntime } from "@/game3d/runtime";
 import { computeShoreDistance, createWaterMaterial, waterUniforms } from "@/game3d/shaders/water";
 
 const REFLECT_NORMAL = new THREE.Vector3(0, 1, 0);
 
 /**
- * Ponds, the creek and the fountain basin: a custom water shader (pixel-snapped ripples,
+ * Ponds, the creek, the fountain basin and (seen from third-person) the lake beyond the hills: a custom water shader (pixel-snapped ripples,
  * fresnel, sun glints, sparkles, depth tint and shoreline foam). On High a low-resolution
  * planar reflection of the village is rendered each frame; other tiers fake it with the sky.
  */
@@ -22,6 +22,7 @@ export function Water() {
   const { layout } = runtime;
   const pond = useRef<THREE.Mesh>(null);
   const basin = useRef<THREE.Mesh>(null);
+  const lakeRef = useRef<THREE.Mesh>(null);
 
   const resources = useMemo(() => {
     const positions: number[] = [];
@@ -57,13 +58,25 @@ export function Water() {
     }
     const disc = new THREE.CircleGeometry(fountain ? fountain.radius * 0.78 : 0.5, 20);
     disc.rotateX(-Math.PI / 2);
+    // The lake: a flat sheet at the water line; the hills around it hide its outer edge.
+    const { lake } = HORIZON;
+    const lakeMaterial = createWaterMaterial(null, layout);
+    waterUniforms(lakeMaterial).uBasin.value.set(lake.x, lake.z, (lake.radiusX + lake.radiusZ) / 2);
+    const lakeDisc = new THREE.CircleGeometry(lake.radiusX + 1.5, 48).scale(
+      1,
+      (lake.radiusZ + 1.5) / (lake.radiusX + 1.5),
+      1,
+    );
+    lakeDisc.rotateX(-Math.PI / 2);
     return {
       geometry,
       shore,
       material,
       fountainMaterial,
+      lakeMaterial,
       disc,
-      materials: [material, fountainMaterial],
+      lakeDisc,
+      materials: [material, fountainMaterial, lakeMaterial],
     };
   }, [layout]);
 
@@ -72,7 +85,12 @@ export function Water() {
     const target = new THREE.WebGLRenderTarget(WATER.reflectionSize, WATER.reflectionSize, {
       type: THREE.HalfFloatType,
     });
-    return { target, camera: new THREE.OrthographicCamera(), matrix: new THREE.Matrix4() };
+    return {
+      target,
+      ortho: new THREE.OrthographicCamera(),
+      perspective: new THREE.PerspectiveCamera(),
+      matrix: new THREE.Matrix4(),
+    };
   }, [reflections]);
 
   useEffect(
@@ -82,6 +100,8 @@ export function Water() {
       resources.shore.dispose();
       resources.material.dispose();
       resources.fountainMaterial.dispose();
+      resources.lakeMaterial.dispose();
+      resources.lakeDisc.dispose();
     },
     [resources],
   );
@@ -101,6 +121,7 @@ export function Water() {
   );
 
   useFrame(({ gl, scene, camera, size }) => {
+    if (lakeRef.current) lakeRef.current.visible = runtime.camera.perspective;
     const state = runtime.cycle.state;
     const sun = state.sunDirection;
     camera.getWorldDirection(scratch.forward);
@@ -129,7 +150,8 @@ export function Water() {
       u.uRain.value = runtime.weather.rain;
     }
     const u = waterUniforms(resources.material);
-    if (!reflection || !(camera instanceof THREE.OrthographicCamera)) {
+    const ortho = camera instanceof THREE.OrthographicCamera;
+    if (!reflection || !(ortho || camera instanceof THREE.PerspectiveCamera)) {
       u.uUseReflection.value = 0;
       return;
     }
@@ -141,14 +163,25 @@ export function Water() {
     look.copy(position).add(scratch.forward);
     target.subVectors(plane, look).reflect(REFLECT_NORMAL).negate().add(plane);
     up.set(0, 1, 0).applyQuaternion(camera.quaternion).reflect(REFLECT_NORMAL);
-    const mirror = reflection.camera;
-    mirror.left = camera.left;
-    mirror.right = camera.right;
-    mirror.top = camera.top;
-    mirror.bottom = camera.bottom;
+    // The mirror camera copies the view's projection (orthographic, or perspective in third-person).
+    let mirror: THREE.OrthographicCamera | THREE.PerspectiveCamera;
+    if (camera instanceof THREE.OrthographicCamera) {
+      const flat = reflection.ortho;
+      flat.left = camera.left;
+      flat.right = camera.right;
+      flat.top = camera.top;
+      flat.bottom = camera.bottom;
+      flat.zoom = camera.zoom;
+      mirror = flat;
+    } else {
+      const lens = reflection.perspective;
+      lens.fov = camera.fov;
+      lens.aspect = camera.aspect;
+      lens.zoom = camera.zoom;
+      mirror = lens;
+    }
     mirror.near = camera.near;
     mirror.far = camera.far;
-    mirror.zoom = camera.zoom;
     mirror.position.copy(view);
     mirror.up.copy(up);
     mirror.lookAt(target);
@@ -183,6 +216,13 @@ export function Water() {
   const fountain = layout.fountain;
   return (
     <group>
+      <mesh
+        ref={lakeRef}
+        geometry={resources.lakeDisc}
+        material={resources.lakeMaterial}
+        position={[HORIZON.lake.x, WORLD.waterLevel, HORIZON.lake.z]}
+        visible={false}
+      />
       <mesh ref={pond} geometry={resources.geometry} material={resources.material} />
       {fountain ? (
         <mesh

@@ -14,6 +14,7 @@ import {
 } from "@/game/map/village";
 import { WORLD } from "@/game3d/config/visuals";
 import { CollisionWorld, type Box, type Circle } from "@/game3d/systems/collision";
+import { outerHeight } from "./horizon";
 
 /**
  * Everything the 3D world derives from the ASCII village map: ground heights, colliders,
@@ -364,6 +365,38 @@ export function groundHeight(layout: WorldLayout, x: number, z: number): number 
     return WORLD.bridgeDeck;
   }
   return layout.heights[index] ?? 0;
+}
+
+/**
+ * Height of the land anywhere: the village's ground inside the map (smoothed across tile
+ * steps within `ramp` units of an edge, so feet climb curbs instead of popping) and the hills
+ * of the horizon outside it.
+ */
+export function terrainHeight(layout: WorldLayout, x: number, z: number, ramp = 0): number {
+  if (x < 0 || z < 0 || x >= layout.width || z >= layout.height) {
+    return outerHeight(x, z, layout.width, layout.height);
+  }
+  const here = groundHeight(layout, x, z);
+  if (ramp <= 0) return here;
+  // Blend toward a neighbouring tile's height near each shared edge (a short ramp).
+  const fx = x - Math.floor(x);
+  const fz = z - Math.floor(z);
+  let height = here;
+  if (fx < ramp) height = blendEdge(height, groundHeight(layout, x - ramp, z), fx / ramp);
+  else if (fx > 1 - ramp)
+    height = blendEdge(height, groundHeight(layout, x + ramp, z), (1 - fx) / ramp);
+  if (fz < ramp) height = blendEdge(height, groundHeight(layout, x, z - ramp), fz / ramp);
+  else if (fz > 1 - ramp)
+    height = blendEdge(height, groundHeight(layout, x, z + ramp), (1 - fz) / ramp);
+  return height;
+}
+
+/** Halfway at the edge (t = 0), the tile's own height at the end of the ramp (t = 1). */
+function blendEdge(own: number, neighbour: number, t: number): number {
+  // Water is never a neighbour to ramp toward (it is solid), so steps down to it stay crisp.
+  if (neighbour < -0.3) return own;
+  const k = 0.5 + 0.5 * t;
+  return neighbour + (own - neighbour) * k;
 }
 
 /** The HUD mini-map payload: terrain classes per tile plus a marker per building door. */

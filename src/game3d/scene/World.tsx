@@ -9,17 +9,24 @@ import { SPRITE_SHEET_PATH, SURFACE_NORMAL_MAPS } from "@/game3d/config/assets";
 import type { SurfaceName } from "@/game3d/textures/surfaces";
 import { Buildings } from "@/game3d/entities/Buildings";
 import { Characters } from "@/game3d/entities/Characters";
+import { DoorHighlight } from "@/game3d/entities/DoorHighlight";
 import { Player } from "@/game3d/entities/Player/Player";
 import { Props } from "@/game3d/entities/Props";
 import { Lighting } from "@/game3d/lighting/Lights";
 import { Effects } from "@/game3d/post/Effects";
 import { useRuntime } from "@/game3d/runtime";
 import { QualityMonitor } from "@/game3d/settings/QualityMonitor";
+import { CameraDirector } from "@/game3d/systems/camera/CameraDirector";
+import { ColliderDebug } from "@/game3d/systems/camera/ColliderDebug";
 import { Simulation } from "@/game3d/systems/Simulation";
 import { Weather } from "@/game3d/weather/Weather";
 import { mapInfoFor } from "@/game3d/world/layout";
 import { AssetsContext, createAssets, disposeAssets, useAssets } from "./assets";
+import { Boundary } from "./Boundary";
+import { GroundDetail } from "./GroundDetail";
+import { Horizon } from "./Horizon";
 import { Sky } from "./Sky";
+import { SkyDome } from "./SkyDome";
 import { Terrain } from "./Terrain";
 import { Water } from "./Water";
 
@@ -78,7 +85,7 @@ function Readiness() {
   const assets = useAssets();
   const gl = useThree((state) => state.gl);
   const scene = useThree((state) => state.scene);
-  const camera = useThree((state) => state.camera);
+  const get = useThree((state) => state.get);
   const { active, progress } = useProgress();
   const [sheetDone, setSheetDone] = useState(SPRITE_SHEET_PATH === null);
   const [compiled, setCompiled] = useState(false);
@@ -109,7 +116,7 @@ function Readiness() {
   useEffect(() => {
     let cancelled = false;
     runtime.bridge.emit("progress", { value: 0.7, label: "Lighting the lamps" });
-    gl.compileAsync(scene, camera)
+    gl.compileAsync(scene, get().camera)
       .catch((error: unknown) =>
         console.warn("Shader warm-up failed; compiling on first use.", error),
       )
@@ -119,7 +126,7 @@ function Readiness() {
     return () => {
       cancelled = true;
     };
-  }, [gl, scene, camera, runtime]);
+  }, [gl, scene, get, runtime]);
 
   useEffect(() => {
     if (active) {
@@ -156,15 +163,22 @@ export function World() {
   return (
     <AssetsContext.Provider value={assets}>
       <Simulation />
+      <CameraDirector />
       <Sky />
+      <SkyDome />
       <Lighting />
       <Terrain />
+      <Horizon />
+      <Boundary />
+      <GroundDetail />
       <Water />
       <Buildings />
+      <DoorHighlight />
       <Props />
       <Player />
       <Characters />
       <Weather />
+      <ColliderDebug />
       <Effects />
       <QualityMonitor />
       <NormalMaps />

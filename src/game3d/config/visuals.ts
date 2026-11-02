@@ -27,6 +27,29 @@ export const WORLD = {
   baseDepth: 2.4,
 } as const;
 
+/**
+ * The land around the village, seen from the third-person view (the isometric view keeps the
+ * floating diorama): a forested shelf, rolling hills, a ring of cliffs, a lake, a tree line and
+ * a band of distant mountains, all fading into the distance fog.
+ */
+export const HORIZON = {
+  /** Flat forest floor around the map before the hills start (units). */
+  shelf: 3,
+  hillHeight: 3.4,
+  cliffStart: 30,
+  cliffHeight: 10,
+  /** How far the land mesh reaches beyond the map, and its grid step. */
+  extent: 78,
+  step: 1.5,
+  lake: { x: 50, z: 47, radiusX: 13, radiusZ: 8.5 },
+  /** Instanced trees on the shelf and hills (they also hide the village's edge). */
+  trees: 520,
+  treeDepth: 26,
+  /** Distant mountains: a ring of low-poly peaks and a farther silhouette band. */
+  mountains: { radius: 150, peaks: 28, height: [18, 42] as const },
+  backdrop: { radius: 210, height: 26 },
+} as const;
+
 // ---------------------------------------------------------------------------------------------
 // Camera
 // ---------------------------------------------------------------------------------------------
@@ -68,7 +91,21 @@ export const MOVE = {
   radius: 0.27,
   /** How quickly the feet follow steps up and down (per second). */
   heightRate: 14,
+  /** Tile steps (curbs, the plaza, the bridge) blend over this width, so feet climb them. */
+  ramp: 0.22,
+  /** Drops deeper than this are falls (gravity); smaller ones are stepped down. */
+  snapDistance: 0.4,
+  gravity: 22,
+  /** The optional short jump (Space): take-off speed, about 0.6 units high. */
+  jumpSpeed: 5.2,
   npcSpeed: 1.1,
+} as const;
+
+/** Doorways you can use: within range, and (in third-person) inside the view cone. */
+export const INTERACT = {
+  range: 2.4,
+  /** Half-angle of the view cone (degrees) around the camera's ground direction. */
+  cone: 62,
 } as const;
 
 export const SPRITES = {
@@ -230,6 +267,12 @@ export const SUN = {
   frustumPadding: 3,
   /** The frustum half-size is rounded up to this step, so zooming doesn't shimmer. */
   frustumStep: 2,
+  /** Half-size of the single shadow map around the player in perspective views. */
+  perspectiveHalf: 20,
+  /** Cascaded shadows (third-person on High): how many, how far they reach, and how far behind the camera casters still count. */
+  cascades: 3,
+  cascadeFar: 70,
+  cascadeMargin: 40,
   distance: 50,
   bias: -0.0004,
   normalBias: 0.035,
@@ -249,8 +292,20 @@ export const CLOUDS = {
 export const FOG = {
   /** Depth (from the camera) where fog starts. The camera sits CAMERA.distance away. */
   depthStart: 44,
+  /** In third-person: fog starts this far out and thickens by this factor, hiding the edge. */
+  thirdPersonStart: 16,
+  thirdPersonDensity: 2.4,
   heightBase: 0,
   heightFalloff: 0.55,
+} as const;
+
+/** The third-person sky dome (inside the camera's far plane) and its cloud layer. */
+export const SKY_DOME = {
+  radius: 200,
+  /** Haze strength along the horizon (0-1). */
+  haze: 0.55,
+  /** Height of the cloud layer the dome samples (the ground's cloud shadows line up with it). */
+  cloudHeight: 55,
 } as const;
 
 // ---------------------------------------------------------------------------------------------
@@ -373,6 +428,16 @@ export const POST = {
   aoFalloff: 0.8,
   aberrationOffset: 0.0014,
   grainOpacity: 0.09,
+  /**
+   * Third-person retune: the sky fills much of the low view, so bloom, exposure and the
+   * vignette ease off as the camera comes down (multipliers at full third-person).
+   */
+  thirdPersonBloom: 0.72,
+  thirdPersonExposure: 0.94,
+  thirdPersonVignette: 0.3,
+  /** Depth of field on the player (High, third-person): a soft, subtle falloff. */
+  dofRange: 5,
+  dofBokehScale: 1.4,
 } as const;
 
 export const PIXEL_MODE = {
@@ -439,6 +504,30 @@ export const WEATHER = {
   shaftAlpha: 0.08,
 } as const;
 
+/** Close-up ground detail in third-person (see scene/GroundDetail.tsx). */
+export const GROUND_DETAIL = {
+  /** Size of the dense grass pool and the radius it is planted in, per quality level. */
+  grass: { low: 0, medium: 700, high: 1500 } satisfies Record<QualityLevel, number>,
+  radius: { low: 0, medium: 8, high: 11 } satisfies Record<QualityLevel, number>,
+  /** Planting grid step and the share of grassy cells that get a tuft. */
+  cell: 0.5,
+  density: 0.55,
+  puddles: 26,
+  particles: 48,
+  /** Footstep particle size (world units) and lifetime (seconds). */
+  particleSize: 0.09,
+  particleLife: 0.45,
+} as const;
+
+/** Third-person building markers: hidden at the door, fading in, then out with distance. */
+export const WAYPOINTS = {
+  hideWithin: 2.5,
+  fadeIn: 3,
+  fadeOut: 36,
+  /** Height of the marker above the building's highest point. */
+  lift: 0.7,
+} as const;
+
 /** Roof and front-wall cutaway when the player stands in a doorway. */
 export const CUTAWAY = {
   opacity: 0.25,
@@ -454,6 +543,12 @@ export interface TierFeatures {
   /** Real-time sun shadows (otherwise only blob shadows under characters). */
   sunShadows: boolean;
   shadowMapSize: number;
+  /** Cascaded sun shadows in third-person (otherwise one map fitted around the player). */
+  cascadedShadows: boolean;
+  /** Third-person: depth of field focused on the player (replaces the diorama's tilt-shift). */
+  depthOfField: boolean;
+  /** How far (world units) the third-person camera draws small props, grass and far trees. */
+  drawDistance: number;
   /** Post stack beyond tone mapping (bloom, grade, vignette). */
   post: boolean;
   tiltShift: boolean;
@@ -474,6 +569,9 @@ export const QUALITY_TIERS: Record<QualityLevel, TierFeatures> = {
     maxDpr: 1,
     sunShadows: false,
     shadowMapSize: 0,
+    cascadedShadows: false,
+    depthOfField: false,
+    drawDistance: 26,
     post: false,
     tiltShift: false,
     ssao: false,
@@ -490,6 +588,9 @@ export const QUALITY_TIERS: Record<QualityLevel, TierFeatures> = {
     maxDpr: 1.5,
     sunShadows: true,
     shadowMapSize: 1024,
+    cascadedShadows: false,
+    depthOfField: false,
+    drawDistance: 42,
     post: true,
     tiltShift: false,
     ssao: false,
@@ -506,6 +607,9 @@ export const QUALITY_TIERS: Record<QualityLevel, TierFeatures> = {
     maxDpr: 2,
     sunShadows: true,
     shadowMapSize: 2048,
+    cascadedShadows: true,
+    depthOfField: true,
+    drawDistance: 70,
     post: true,
     tiltShift: true,
     ssao: true,

@@ -15,6 +15,39 @@ export const QUALITY_SETTINGS: readonly QualitySetting[] = ["auto", "low", "medi
 
 export type DayPhase = "Night" | "Dawn" | "Day" | "Dusk";
 
+/** The diorama view from above, or a camera behind the player's back. */
+export type CameraMode = "isometric" | "thirdPerson";
+export const CAMERA_MODES: readonly CameraMode[] = ["isometric", "thirdPerson"];
+
+/** Visitor options for the third-person camera. */
+export interface CameraOptions {
+  invertY: boolean;
+  /** Swing back behind the player after a moment without look input. */
+  autoRecenter: boolean;
+  /** Capture the mouse for looking (Esc releases it) instead of click-and-drag. */
+  pointerLock: boolean;
+  /** Space jumps. */
+  jump: boolean;
+}
+
+/** Live third-person and shadow tunables edited by the debug panel (backquote). */
+export interface CameraTuning {
+  fov: number;
+  armLength: number;
+  shoulderOffset: number;
+  /** Follow and rotation smoothing rates (per second). */
+  positionDamping: number;
+  rotationDamping: number;
+  shadowBias: number;
+  shadowNormalBias: number;
+  /** Draws the camera and movement colliders. */
+  showColliders: boolean;
+}
+
+export function isCameraMode(value: unknown): value is CameraMode {
+  return typeof value === "string" && (CAMERA_MODES as readonly string[]).includes(value);
+}
+
 export function isTimeMode(value: unknown): value is TimeMode {
   return typeof value === "string" && (TIME_MODES as readonly string[]).includes(value);
 }

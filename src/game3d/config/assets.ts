@@ -37,6 +37,15 @@ export const PLAYER_SPRITES: { image: string | null; atlas: string | null } = {
 };
 
 /**
+ * An optional low-poly 3D player (glTF / GLB) with animation clips named Idle, Walk and Run
+ * (matched ignoring case). When the file exists it replaces the pixel billboard and casts
+ * real shadows; when it is missing the billboard stays. +Y up, facing +Z, feet at y = 0;
+ * it is scaled to `PLAYER_MODEL_HEIGHT` world units tall.
+ */
+export const PLAYER_MODEL_PATH: string | null = "/assets/models/player.glb";
+export const PLAYER_MODEL_HEIGHT = 1;
+
+/**
  * Sheet for the villagers, the cat and birds, e.g. "/assets/sprites/characters.png": 16x16
  * cells laid out like the generated sheet (see CHARACTER_SHEET in textures/sprites.ts).
  */

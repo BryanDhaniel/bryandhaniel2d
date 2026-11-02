@@ -2,10 +2,35 @@ import * as THREE from "three";
 import { FOG } from "@/game3d/config/visuals";
 
 /**
- * Height fog for every material that uses three.js fog: the built-in FogExp2 density is
- * applied to the depth beyond FOG.depthStart and thickens toward the ground, so valleys and
- * the water hold mist while rooftops stay clear. Installed once by replacing the fog chunks.
+ * Height fog for every material that uses three.js fog. The scene uses a VillageFog (a
+ * three.js Fog whose `near` is where the fog starts and whose `far` carries the density), so
+ * the start can move with the camera mode without recompiling a shader: exponential fog
+ * beyond the start, thickening toward the ground, so valleys and the water hold mist while
+ * rooftops stay clear. Installed once by replacing the fog chunks.
  */
+export class VillageFog extends THREE.Fog {
+  constructor(color: THREE.ColorRepresentation, start: number, density: number) {
+    super(color, start, density);
+  }
+
+  /** Depth from the camera where the fog begins. */
+  get start(): number {
+    return this.near;
+  }
+
+  set start(value: number) {
+    this.near = value;
+  }
+
+  get density(): number {
+    return this.far;
+  }
+
+  set density(value: number) {
+    this.far = value;
+  }
+}
+
 let installed = false;
 
 export function installHeightFog(): void {
@@ -48,13 +73,17 @@ export function installHeightFog(): void {
   THREE.ShaderChunk.fog_fragment = /* glsl */ `
 #ifdef USE_FOG
   #ifdef FOG_EXP2
-    float fogDistance = max( vFogDepth - ${FOG.depthStart.toFixed(2)}, 0.0 );
-    float fogFactor = 1.0 - exp( - fogDensity * fogDistance );
-    float fogLift = exp( - max( vFogHeight - ${FOG.heightBase.toFixed(2)}, 0.0 ) * ${FOG.heightFalloff.toFixed(3)} );
-    fogFactor = clamp( fogFactor * ( 0.35 + 0.65 * fogLift ) + fogDensity * 6.0 * fogLift, 0.0, 1.0 );
+    float villageFogStart = ${FOG.depthStart.toFixed(2)};
+    float villageFogDensity = fogDensity;
   #else
-    float fogFactor = smoothstep( fogNear, fogFar, vFogDepth );
+    // VillageFog: near = where it starts, far = density.
+    float villageFogStart = fogNear;
+    float villageFogDensity = fogFar;
   #endif
+    float fogDistance = max( vFogDepth - villageFogStart, 0.0 );
+    float fogFactor = 1.0 - exp( - villageFogDensity * fogDistance );
+    float fogLift = exp( - max( vFogHeight - ${FOG.heightBase.toFixed(2)}, 0.0 ) * ${FOG.heightFalloff.toFixed(3)} );
+    fogFactor = clamp( fogFactor * ( 0.35 + 0.65 * fogLift ) + villageFogDensity * 6.0 * fogLift, 0.0, 1.0 );
   gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, fogFactor );
 #endif
 `;

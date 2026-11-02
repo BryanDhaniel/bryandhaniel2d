@@ -1,7 +1,13 @@
 "use client";
 
 import { useEffect, useId, useRef, useState } from "react";
-import type { QualityLevel, QualitySetting, TimeMode, WeatherKind } from "@/game/settings/types";
+import type {
+  CameraOptions,
+  QualityLevel,
+  QualitySetting,
+  TimeMode,
+  WeatherKind,
+} from "@/game/settings/types";
 import { PixelIcon } from "@/components/PixelIcon";
 
 interface Option<T extends string> {
@@ -81,6 +87,8 @@ interface SettingsMenuProps {
   onWeather: (kind: WeatherKind) => void;
   onQuality: (setting: QualitySetting) => void;
   onVisualOptions: (options: { pixelMode: boolean; grain: boolean; aberration: boolean }) => void;
+  camera: CameraOptions;
+  onCameraOptions: (options: CameraOptions) => void;
 }
 
 function Toggle({
@@ -128,6 +136,8 @@ export function SettingsMenu({
   onWeather,
   onQuality,
   onVisualOptions,
+  camera,
+  onCameraOptions,
 }: SettingsMenuProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -190,7 +200,7 @@ export function SettingsMenu({
           id={panelId}
           role="group"
           aria-label="Village settings"
-          className="absolute top-14 right-0 z-40 w-72 max-w-[calc(100vw-1.5rem)] space-y-4 p-4 pixel-panel"
+          className="absolute top-full right-0 z-40 mt-3 max-h-[calc(100vh-8rem)] w-72 max-w-[calc(100vw-1.5rem)] space-y-4 overflow-y-auto p-4 pixel-panel"
         >
           <RadioGroup
             legend="Time of day"
@@ -231,6 +241,31 @@ export function SettingsMenu({
               label="Chromatic aberration"
               checked={aberration}
               onChange={(checked) => onVisualOptions({ ...visual, aberration: checked })}
+            />
+          </fieldset>
+          <fieldset className="space-y-2">
+            <legend className="mb-1 text-sm tracking-wide text-slate uppercase">
+              Third-person camera
+            </legend>
+            <Toggle
+              label="Invert vertical look"
+              checked={camera.invertY}
+              onChange={(checked) => onCameraOptions({ ...camera, invertY: checked })}
+            />
+            <Toggle
+              label="Swing back behind me while walking"
+              checked={camera.autoRecenter}
+              onChange={(checked) => onCameraOptions({ ...camera, autoRecenter: checked })}
+            />
+            <Toggle
+              label="Mouse look (click to capture, Esc releases)"
+              checked={camera.pointerLock}
+              onChange={(checked) => onCameraOptions({ ...camera, pointerLock: checked })}
+            />
+            <Toggle
+              label="Space to jump"
+              checked={camera.jump}
+              onChange={(checked) => onCameraOptions({ ...camera, jump: checked })}
             />
           </fieldset>
         </div>

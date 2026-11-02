@@ -4,12 +4,13 @@ import { AnimatePresence, motion } from "framer-motion";
 import type { ComponentProps } from "react";
 import type { SectionId } from "@/content/portfolio";
 import type { GameBridge, MapInfo } from "@/game/bridge";
-import type { DayPhase } from "@/game/settings/types";
+import type { CameraMode, DayPhase } from "@/game/settings/types";
 import { PixelIcon } from "@/components/PixelIcon";
 import { PlayerPortrait } from "@/components/PixelGrid";
 import { MiniMap } from "./MiniMap";
 import { SettingsMenu } from "./SettingsMenu";
 import { SkipLink } from "./SkipLink";
+import { ViewControls } from "./ViewControls";
 
 interface HudProps {
   bridge: GameBridge;
@@ -22,6 +23,10 @@ interface HudProps {
   muted: boolean;
   inert: boolean;
   settings: ComponentProps<typeof SettingsMenu>;
+  cameraMode: CameraMode;
+  onCameraMode: (mode: CameraMode) => void;
+  onResetCamera: () => void;
+  onQuickTravel: (sectionId: SectionId) => void;
   onToggleMute: () => void;
   onTravel: (sectionId: SectionId) => void;
 }
@@ -44,6 +49,10 @@ export function Hud({
   muted,
   inert,
   settings,
+  cameraMode,
+  onCameraMode,
+  onResetCamera,
+  onQuickTravel,
   onToggleMute,
   onTravel,
 }: HudProps) {
@@ -94,11 +103,18 @@ export function Hud({
         </div>
         {mapInfo ? (
           <div className="hidden md:block">
-            <MiniMap info={mapInfo} bridge={bridge} onTravel={onTravel} />
+            <MiniMap info={mapInfo} bridge={bridge} mode={cameraMode} onTravel={onTravel} />
           </div>
         ) : null}
       </div>
-      <div className="pointer-events-auto relative ml-auto flex shrink-0 items-start gap-2">
+      <div className="pointer-events-auto relative ml-auto flex max-w-full flex-wrap items-start justify-end gap-2">
+        <ViewControls
+          mode={cameraMode}
+          markers={mapInfo?.markers ?? []}
+          onMode={onCameraMode}
+          onResetCamera={onResetCamera}
+          onQuickTravel={onQuickTravel}
+        />
         <button
           type="button"
           aria-pressed={muted}

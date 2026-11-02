@@ -160,30 +160,50 @@ describe("terrain", () => {
 });
 
 describe("input", () => {
-  it("turns keys and the D-pad into screen-relative intent", () => {
+  it("turns the D-pad and joystick into camera-relative movement", () => {
     const input = new InputController();
     input.setDpad(0, -1);
-    input.update();
-    expect(input.intent).toEqual({ x: 0, y: 1 });
+    input.update(1 / 60);
+    expect(input.actions.move).toEqual({ x: 0, y: 1 });
     input.setDpad(1, 1);
-    input.update();
-    expect(input.intent.x).toBeCloseTo(Math.SQRT1_2);
-    expect(input.intent.y).toBeCloseTo(-Math.SQRT1_2);
+    input.update(1 / 60);
+    expect(input.actions.move.x).toBeCloseTo(Math.SQRT1_2);
+    expect(input.actions.move.y).toBeCloseTo(-Math.SQRT1_2);
     input.reset();
-    input.update();
-    expect(input.intent).toEqual({ x: 0, y: 0 });
+    input.setJoystick(0.3, 0.4);
+    input.update(1 / 60);
+    expect(input.actions.move.x).toBeCloseTo(0.3);
+    expect(input.actions.move.y).toBeCloseTo(0.4);
+    input.reset();
+    input.update(1 / 60);
+    expect(input.actions.move).toEqual({ x: 0, y: 0 });
   });
 
-  it("queues interactions, turns and taps until consumed", () => {
+  it("queues interactions, turns, camera resets and taps until consumed", () => {
     const input = new InputController();
     input.queueInteract();
     input.queueTurn(1);
+    input.queueResetCamera();
     input.queueTap({ tileX: 3, tileZ: 4, buildingIndex: -1 });
     expect(input.consumeInteract()).toBe(true);
     expect(input.consumeInteract()).toBe(false);
     expect(input.consumeTurn()).toBe(1);
     expect(input.consumeTurn()).toBe(0);
+    expect(input.consumeResetCamera()).toBe(true);
+    expect(input.consumeResetCamera()).toBe(false);
     expect(input.consumeTap()).toEqual({ tileX: 3, tileZ: 4, buildingIndex: -1 });
     expect(input.consumeTap()).toBeNull();
+  });
+
+  it("only looks around in third-person, and counts time without look input", () => {
+    const input = new InputController();
+    input.update(0.5);
+    expect(input.actions.look).toEqual({ yaw: 0, pitch: 0 });
+    expect(input.idleLook).toBeCloseTo(0.5);
+    input.setMode("thirdPerson");
+    input.look.mouse.x = 100;
+    input.update(1 / 60);
+    expect(input.actions.look.yaw).toBeLessThan(0);
+    expect(input.idleLook).toBe(0);
   });
 });

@@ -53,6 +53,8 @@ export interface BuildingModel {
   swingers: { object: THREE.Object3D; amplitude: number; phase: number }[];
   /** World-space anchor for the HTML "E / Tap" prompt. */
   prompt: THREE.Vector3;
+  /** The front door (world space): centre of its threshold, its size, and the wall face it sits in. */
+  door: { x: number; y: number; z: number; width: number; height: number };
   /** Where dust motes drift in the window light (Library). */
   dustSpots: THREE.Vector3[];
 }
@@ -62,6 +64,21 @@ interface WindowSpec {
   y: number;
   width: number;
   height: number;
+}
+
+interface DoorSpec {
+  /** Centre along the wall, measured from the wall's start. */
+  at: number;
+  width: number;
+  height: number;
+}
+
+/** Where a wall sits (building-local): its start, its turn around Y and its length. */
+interface WallFrame {
+  origin: THREE.Vector3;
+  rotY: number;
+  length: number;
+  base: number;
 }
 
 interface WallsSpec {
@@ -76,7 +93,9 @@ interface WallsSpec {
   ridge: "x" | "z" | null;
   rise: number;
   windows: Partial<Record<Side, WindowSpec[]>>;
-  door?: { at: number; width: number; height: number };
+  door?: DoorSpec;
+  /** Back and side doors (for show: the front door is the one that opens a panel). */
+  doors?: Partial<Record<Exclude<Side, "s">, DoorSpec>>;
   /** Window sills and lintels in this trim surface. */
   trim?: SurfaceName;
   shutters?: SurfaceName;
@@ -109,6 +128,10 @@ class Blueprint {
   readonly dust: THREE.Vector3[] = [];
   forge: THREE.Vector3 | null = null;
   doorHeight = 1.5;
+  doorWidth = 0.6;
+  doorBase = 0;
+  /** Local z of the front wall's outer face. */
+  doorFace = 0;
 
   constructor(
     readonly layout: BuildingLayout,
@@ -149,7 +172,7 @@ class Blueprint {
   }
 
   /** Four walls with openings, gables across the ridge, sills, lintels and glass. */
-  walls(spec: WallsSpec): void {
+  walls(spec: WallsSpec): Record<Side, WallFrame> {
     const t = WALL;
     const material = this.m.surface(spec.surface);
     const glass = this.m.emissive(spec.glass);
@@ -200,15 +223,15 @@ class Blueprint {
         width: w.width,
         height: w.height,
       }));
-      const door: Hole | undefined =
-        wall.side === "s" && spec.door
-          ? {
-              x: spec.door.at - spec.door.width / 2,
-              y: 0,
-              width: spec.door.width,
-              height: spec.door.height,
-            }
-          : undefined;
+      const opening = wall.side === "s" ? spec.door : spec.doors?.[wall.side];
+      const door: Hole | undefined = opening
+        ? {
+            x: opening.at - opening.width / 2,
+            y: 0,
+            width: opening.width,
+            height: opening.height,
+          }
+        : undefined;
       const gable = wall.gable ? (spec.rise * (wall.length / 2)) / halfSpan : 0;
       this.kit.add(group, material, wallShape(wall.length, spec.height, t, holes, gable, door), {
         x: wall.origin.x,
@@ -259,37 +282,123 @@ class Blueprint {
       }
     }
     if (spec.door) {
-      const { at, width, height } = spec.door;
-      this.doorHeight = height;
-      const origin = sides[0]?.origin ?? new THREE.Vector3();
+      this.doorHeight = spec.door.height;
+      this.doorWidth = spec.door.width;
+      this.doorBase = spec.base;
+      this.doorFace = spec.z1;
+    }
+    for (const wall of sides) {
+      const opening = wall.side === "s" ? spec.door : spec.doors?.[wall.side];
+      if (!opening) continue;
+      const { at, width, height } = opening;
+      const group = `wall-${wall.side}`;
       this.addOnWall(
-        "wall-s",
+        group,
         this.m.surface("door"),
         texturedBox(width, height, 0.06),
-        origin,
-        0,
+        wall.origin,
+        wall.rotY,
         new THREE.Vector3(at, height / 2, t * 0.3),
       );
       const trim = this.m.surface(spec.trim ?? "trim");
       this.addOnWall(
-        "wall-s",
+        group,
         trim,
         texturedBox(width + 0.24, 0.12, t + 0.1),
-        origin,
-        0,
+        wall.origin,
+        wall.rotY,
         new THREE.Vector3(at, height + 0.06, t / 2),
       );
       for (const dir of [-1, 1]) {
         this.addOnWall(
-          "wall-s",
+          group,
           trim,
           texturedBox(0.1, height, t + 0.08),
-          origin,
-          0,
+          wall.origin,
+          wall.rotY,
           new THREE.Vector3(at + dir * (width / 2 + 0.05), height / 2, t / 2),
         );
       }
+      if (wall.side !== "s") {
+        // Back doors get a little canopy and a step.
+        this.addOnWall(
+          group,
+          this.m.surface("roofShingle"),
+          texturedBox(width + 0.4, 0.06, 0.34),
+          wall.origin,
+          wall.rotY,
+          new THREE.Vector3(at, height + 0.24, t + 0.17),
+        );
+        this.addOnWall(
+          "static",
+          this.m.surface("kerb"),
+          texturedBox(width + 0.2, 0.06, 0.12),
+          wall.origin,
+          wall.rotY,
+          new THREE.Vector3(at, -spec.base + 0.03, t + 0.06),
+        );
+      }
     }
+    const frames = {} as Record<Side, WallFrame>;
+    for (const wall of sides) {
+      frames[wall.side] = {
+        origin: wall.origin,
+        rotY: wall.rotY,
+        length: wall.length,
+        base: spec.base,
+      };
+    }
+    return frames;
+  }
+
+  /** A building-local point on a wall: `along` it, `y` above its base, `out` past its face. */
+  wallPoint(frame: WallFrame, along: number, y: number, out: number): THREE.Vector3 {
+    return new THREE.Vector3(along, y, WALL + out)
+      .applyAxisAngle(new THREE.Vector3(0, 1, 0), frame.rotY)
+      .add(frame.origin);
+  }
+
+  /** A planter of flowers under a window, hung on the wall. */
+  flowerBox(frame: WallFrame, along: number, width: number, y: number): void {
+    const at = this.wallPoint(frame, along, y, 0.11);
+    this.kit.add("static", this.m.surface("planks"), texturedBox(width, 0.16, 0.2), {
+      x: at.x,
+      y: at.y,
+      z: at.z,
+      rotY: frame.rotY,
+    });
+    this.kit.add("static", this.m.surface("bush"), texturedBox(width - 0.08, 0.14, 0.14), {
+      x: at.x,
+      y: at.y + 0.15,
+      z: at.z,
+      rotY: frame.rotY,
+    });
+  }
+
+  /** A wall lantern on a bracket; it glows (and lights the wall) at night. */
+  wallLamp(frame: WallFrame, along: number, y: number): void {
+    const bracket = this.wallPoint(frame, along, y + 0.12, 0.12);
+    this.kit.add("static", this.m.surface("iron"), texturedBox(0.06, 0.06, 0.24), {
+      x: bracket.x,
+      y: bracket.y,
+      z: bracket.z,
+      rotY: frame.rotY,
+    });
+    const lamp = this.wallPoint(frame, along, y - 0.08, 0.22);
+    this.kit.add("static", this.m.emissive("lamp"), texturedBox(0.14, 0.2, 0.14), {
+      x: lamp.x,
+      y: lamp.y,
+      z: lamp.z,
+      rotY: frame.rotY,
+    });
+    const light = this.wallPoint(frame, along, y, 0.5);
+    this.light("lantern", light.x, light.y, light.z);
+  }
+
+  /** A sign board fixed flat to a wall, so each building reads from every side. */
+  wallSign(frame: WallFrame, icon: IconName, along: number, y: number): void {
+    const at = this.wallPoint(frame, along, y, 0.04);
+    this.sign(icon, at.x, at.y, at.z, frame.rotY, false);
   }
 
   private addOnWall(
@@ -413,6 +522,13 @@ class Blueprint {
         this.doorHeight + 0.75,
         this.layout.doorZ + 0.25,
       ),
+      door: {
+        x: this.layout.doorX,
+        y: this.doorBase,
+        z: this.doorFace > 0 ? this.layout.rect.y + this.doorFace : this.layout.doorZ,
+        width: this.doorWidth,
+        height: this.doorHeight,
+      },
       dustSpots: this.dust.map(world),
     };
   }
@@ -424,7 +540,7 @@ function home(b: Blueprint): void {
   const height = 2;
   const rise = 1.3;
   const door = b.doorX - m;
-  b.walls({
+  const walls = b.walls({
     x0: m,
     z0: m,
     x1: W - m,
@@ -450,6 +566,7 @@ function home(b: Blueprint): void {
       ],
     },
     door: { at: door, width: 0.9, height: 1.45 },
+    doors: { n: { at: 2.25, width: 0.7, height: 1.3 } },
   });
   // Half-timbering: corner posts and a top beam in dark wood.
   for (const [x, z] of [
@@ -482,6 +599,11 @@ function home(b: Blueprint): void {
   b.light("window", 1.2, 1.1, D - m + 0.4);
   b.light("window", W - 1.2, 1.1, D - m + 0.4);
   b.light("fire", W - 1.1, 0.5, 1.1);
+  // The other three sides: a back door with a lantern, window boxes and a side sign.
+  b.wallLamp(walls.n, 2.95, 1.25);
+  b.flowerBox(walls.e, 1.6, 0.7, 0.66);
+  b.flowerBox(walls.w, 1.6, 0.7, 0.66);
+  b.wallSign(walls.e, "house", 2.75, 1.05);
 }
 
 function workshop(b: Blueprint): void {
@@ -490,7 +612,7 @@ function workshop(b: Blueprint): void {
   const barnX1 = W - 1.6;
   const height = 2.2;
   const rise = 1.45;
-  b.walls({
+  const walls = b.walls({
     x0: m,
     z0: m,
     x1: barnX1,
@@ -508,6 +630,7 @@ function workshop(b: Blueprint): void {
       n: [{ at: 1.2, y: 0.9, width: 0.7, height: 0.6 }],
     },
     door: { at: b.doorX - m, width: 1.25, height: 1.7 },
+    doors: { n: { at: 2.6, width: 0.7, height: 1.4 } },
   });
   b.gableRoof(m, m, barnX1, D - m, height, rise, 0.3, "roofShingle", "z");
   // A big gear on the gable, turning slowly.
@@ -548,6 +671,9 @@ function workshop(b: Blueprint): void {
   b.sign("gear", m + 0.55, 1.75, D - m + 0.3, 0, true);
   b.light("forge", W - 0.85, 0.7, 2.15);
   b.light("window", m + 0.65, 1.2, D - m + 0.4);
+  b.wallLamp(walls.n, 2.6, 1.85);
+  b.flowerBox(walls.w, 1.75, 0.8, 0.76);
+  b.wallSign(walls.w, "gear", 2.78, 1.1);
 }
 
 function library(b: Blueprint): void {
@@ -555,7 +681,7 @@ function library(b: Blueprint): void {
   const m = 0.15;
   const front = D - 0.85;
   const height = 3;
-  b.walls({
+  const walls = b.walls({
     x0: m,
     z0: m,
     x1: W - m,
@@ -586,6 +712,7 @@ function library(b: Blueprint): void {
       ],
     },
     door: { at: b.doorX - m, width: 1.05, height: 1.85 },
+    doors: { n: { at: 2.37, width: 0.8, height: 1.6 } },
   });
   // Cornice, hip roof and a little clock turret.
   b.box("roof", "kerb", W - 2 * m + 0.3, 0.16, front - m + 0.3, W / 2, height, (m + front) / 2);
@@ -633,6 +760,9 @@ function library(b: Blueprint): void {
     new THREE.Vector3(1.05, 1.2, front + 0.55),
     new THREE.Vector3(W - 1.05, 1.2, front + 0.55),
   );
+  b.wallLamp(walls.n, 2.37, 2.15);
+  b.wallSign(walls.e, "book", 1.68, 1.55);
+  b.wallSign(walls.w, "book", 1.68, 1.55);
 }
 
 function ailab(b: Blueprint): void {
@@ -641,7 +771,7 @@ function ailab(b: Blueprint): void {
   const base = 0.3;
   const height = 2.35;
   b.box("static", "stone", W - 2 * m + 0.2, base, D - 2 * m + 0.2, W / 2, 0, D / 2);
-  b.walls({
+  const walls = b.walls({
     x0: m,
     z0: m,
     x1: W - m,
@@ -660,8 +790,13 @@ function ailab(b: Blueprint): void {
       ],
       e: [{ at: 0.6, y: 0.8, width: 2.8, height: 0.8 }],
       w: [{ at: 0.6, y: 0.8, width: 2.8, height: 0.8 }],
+      n: [
+        { at: 0.3, y: 0.8, width: 1.2, height: 0.9 },
+        { at: W - 2 * m - 1.5, y: 0.8, width: 1.2, height: 0.9 },
+      ],
     },
     door: { at: b.doorX - m, width: 1, height: 1.65 },
+    doors: { n: { at: (W - 2 * m) / 2, width: 0.9, height: 1.5 } },
   });
   const top = base + height;
   b.box("roof", "roofMetal", W - 2 * m + 0.16, 0.14, D - 2 * m + 0.16, W / 2, top, D / 2);
@@ -752,6 +887,23 @@ function ailab(b: Blueprint): void {
   b.light("monitor", W - 1.45, base + 1, D / 2 + 0.9);
   b.light("monitor", 1.5, base + 1, m + 1.2);
   b.doorHeight = 1.95;
+  b.wallLamp(walls.n, (W - 2 * m) / 2, 1.85);
+  b.wallSign(walls.w, "chip", 3.85, 1.2);
+  // A humming cooling unit on the east wall.
+  const unit = b.wallPoint(walls.e, 3.85, 0.45, 0.22);
+  b.kit.add("static", b.m.surface("metal"), texturedBox(0.62, 0.5, 0.4), {
+    x: unit.x,
+    y: unit.y,
+    z: unit.z,
+    rotY: walls.e.rotY,
+  });
+  const grille = b.wallPoint(walls.e, 3.85, 0.45, 0.43);
+  b.kit.add("static", b.m.surface("iron"), texturedBox(0.44, 0.36, 0.03), {
+    x: grille.x,
+    y: grille.y,
+    z: grille.z,
+    rotY: walls.e.rotY,
+  });
 }
 
 function inn(b: Blueprint): void {
@@ -760,7 +912,7 @@ function inn(b: Blueprint): void {
   const ground = 1.6;
   const upper = 1.45;
   const rise = 1.7;
-  b.walls({
+  const groundWalls = b.walls({
     x0: m,
     z0: m,
     x1: W - m,
@@ -779,8 +931,13 @@ function inn(b: Blueprint): void {
       ],
       e: [{ at: 1.2, y: 0.65, width: 0.7, height: 0.65 }],
       w: [{ at: 1.2, y: 0.65, width: 0.7, height: 0.65 }],
+      n: [
+        { at: 0.4, y: 0.65, width: 0.75, height: 0.65 },
+        { at: W - 2 * m - 1.15, y: 0.65, width: 0.75, height: 0.65 },
+      ],
     },
     door: { at: b.doorX - m, width: 0.95, height: 1.4 },
+    doors: { n: { at: (W - 2 * m) / 2, width: 0.8, height: 1.3 } },
   });
   b.walls({
     x0: m - 0.05,
@@ -802,6 +959,10 @@ function inn(b: Blueprint): void {
       ],
       e: [{ at: 1.3, y: 0.45, width: 0.6, height: 0.6 }],
       w: [{ at: 1.3, y: 0.45, width: 0.6, height: 0.6 }],
+      n: [
+        { at: 0.8, y: 0.45, width: 0.6, height: 0.6 },
+        { at: W - 2 * m - 1.3, y: 0.45, width: 0.6, height: 0.6 },
+      ],
     },
   });
   // Timber frame on the upper storey and the jetty beam.
@@ -843,6 +1004,9 @@ function inn(b: Blueprint): void {
   b.light("window", 1.0, 1.0, D - m + 0.4);
   b.light("window", W - 1.0, 1.0, D - m + 0.4);
   b.light("fire", W - 0.9, 0.5, 1.1);
+  b.wallLamp(groundWalls.n, (W - 2 * m) / 2 + 0.75, 1.15);
+  b.wallSign(groundWalls.w, "envelope", 2.75, 0.95);
+  b.flowerBox(groundWalls.e, 1.55, 0.8, 0.56);
 }
 
 function mailbox(b: Blueprint): void {

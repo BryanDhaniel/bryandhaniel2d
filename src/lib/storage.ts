@@ -10,6 +10,11 @@ export const STORAGE_KEYS = {
   aberration: "kiz-village:aberration",
   playAnyway: "kiz-village:play-anyway",
   fallbackReason: "kiz-village:fallback-reason",
+  cameraMode: "kiz-village:camera-mode",
+  invertY: "kiz-village:invert-y",
+  autoRecenter: "kiz-village:auto-recenter",
+  pointerLock: "kiz-village:pointer-lock",
+  jump: "kiz-village:jump",
 } as const;
 
 export type StorageArea = "local" | "session";

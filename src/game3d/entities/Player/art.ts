@@ -4,8 +4,10 @@ import { CHARACTER } from "@/game3d/config/character";
 /**
  * The player sprite as pixel data. Frames are composed from compact part arrays (head, torso,
  * hem, arms, legs, fringe tips) stamped at per-frame offsets, so the breathing bob, the walk
- * cycle and the wave share one drawing. Pure TypeScript (no DOM, no three.js): the game, the
- * atlas export script, the contact sheet and the portrait all build from it.
+ * cycle and the wave share one drawing. Eight directions: front, back, the side profile and
+ * the two three-quarter views (left-facing ones are mirrors), so the third-person camera can
+ * show the angle it actually sees. Pure TypeScript (no DOM, no three.js): the game, the atlas
+ * export script, the contact sheet and the portrait all build from it.
  *
  * Legend (every ink is a palette name except skin, which comes from config/character.ts):
  *   .  transparent        X outline          L lit-side outline (upper left)
@@ -15,8 +17,49 @@ import { CHARACTER } from "@/game3d/config/character";
  *   h n portrait background bands
  */
 
-export type Direction = "down" | "left" | "right" | "up";
-export const DIRECTIONS: readonly Direction[] = ["down", "left", "right", "up"];
+/**
+ * Facing relative to the camera: "down" faces it, "up" shows the back, and the diagonals are
+ * the three-quarter views (front-left, front-right, back-left, back-right).
+ */
+export type Direction =
+  "down" | "left" | "right" | "up" | "down-left" | "down-right" | "up-left" | "up-right";
+/** Atlas row order: the four original directions first, so 4-direction sheets still line up. */
+export const DIRECTIONS: readonly Direction[] = [
+  "down",
+  "left",
+  "right",
+  "up",
+  "down-left",
+  "down-right",
+  "up-left",
+  "up-right",
+];
+export const CARDINAL_DIRECTIONS: readonly Direction[] = ["down", "left", "right", "up"];
+
+export function isDiagonal(direction: Direction): boolean {
+  return direction.includes("-");
+}
+
+/** Clockwise from the back view in 45° steps (the order a turning camera passes them in). */
+const BY_ANGLE: readonly Direction[] = [
+  "up",
+  "up-left",
+  "left",
+  "down-left",
+  "down",
+  "down-right",
+  "right",
+  "up-right",
+];
+
+/**
+ * The direction to show for a relative angle: the character's heading minus the way the
+ * camera (or the sun, for the shadow) looks, in radians; 0 shows the back.
+ */
+export function directionFor(relative: number): Direction {
+  const step = Math.round(relative / (Math.PI / 4));
+  return BY_ANGLE[((step % 8) + 8) % 8] ?? "down";
+}
 
 export type Animation = "idle" | "walk" | "interact";
 export const ANIMATIONS: readonly Animation[] = ["idle", "walk", "interact"];
@@ -82,17 +125,44 @@ export const PARTS = {
     "..X787776X..",
     "...X6765X...",
   ],
-  // From behind: the same top block, then the short back block over the neck.
+  // From behind: the same top block, then the short faded back block tapering to a point
+  // at the nape.
   headUp: [
     "...LLLXXX...",
     ".LL444332XX.",
     "L3444333221X",
-    "L3333222211X",
-    ".X12222211X.",
-    ".X61121115X.",
-    "..X212211X..",
-    "...X5665X...",
+    "L3332223211X",
+    ".X12122121X.",
+    ".X61211215X.",
+    "..X121121X..",
+    "...X5115X...",
   ],
+  // Three-quarter back, turned to the right: the back block, the right ear and the edge of
+  // the cheek; the fringe's tip pokes out past the brow.
+  headUpSide: [
+    "...LLLXXX...",
+    ".LL444332XX.",
+    "L3444333221X",
+    "L3332223121X",
+    ".X1212212X1.",
+    ".X21211216X.",
+    "..X121165X..",
+    "...X5156X...",
+  ],
+  // Three-quarter front, turned to the right: the left ear and sideburn, both eyes shifted
+  // toward the turn, the chin following.
+  headDownSide: [
+    "...LLLXXX...",
+    ".LL444332XX.",
+    "L3444333221X",
+    "L3323222121X",
+    ".X12123821X.",
+    ".X61817717X.",
+    "..X578777X..",
+    "....X6776X..",
+  ],
+  // The top block springs up a pixel as the body drops on a footfall (back views).
+  crownBounce: ["...LLLXXX...", "..L444332X.."],
   // Profile facing right: the fringe over the brow, the ear set in the short dark side.
   headSide: [
     "...LLLXXX...",
@@ -112,6 +182,10 @@ export const PARTS = {
   torsoDown: ["LdcaaaabbX", "LdcwbbwbaX", "LdcwcbwbaX", "LcaaaaaabX"],
   // Back: the hood lying on the upper back above its dark lower edge.
   torsoUp: ["LddccbbbaX", "LdcddccbaX", "LcbaaaabaX", "LcccbbbbaX"],
+  // Three-quarter front: the hood opening and drawstrings shifted toward the turn.
+  torsoDownSide: ["LddcaaaabX", "LddcwbwbaX", "LdcbwcwbaX", "LccaaaaaaX"],
+  // Three-quarter back: the hood bunched over the left shoulder blade.
+  torsoUpSide: ["LdddccbbaX", "LddcdcbbaX", "LcaaaabbaX", "LcccbbbbaX"],
   // Side: the hood bunch behind the neck, a drawstring at the front.
   torsoSide: ["LddcbbaX", "LdcbbbwX", "LcbbbbwX", "LcbbbaaX"],
   // Ribbed hems (sway a pixel either way while walking).
@@ -145,7 +219,34 @@ interface Stamp {
   y: number;
 }
 
-type View = "down" | "up" | "side";
+type View = "down" | "up" | "side" | "downSide" | "upSide";
+
+const VIEWS: Readonly<Record<Direction, View>> = {
+  down: "down",
+  up: "up",
+  left: "side",
+  right: "side",
+  "down-left": "downSide",
+  "down-right": "downSide",
+  "up-left": "upSide",
+  "up-right": "upSide",
+};
+
+/** Left-facing directions are drawn as the mirror image of their right-facing twin. */
+const MIRRORED: ReadonlySet<Direction> = new Set<Direction>(["left", "down-left", "up-left"]);
+
+/** Head and torso per front-ish view (the three-quarter views share the front's body plan). */
+const FRONT_PARTS: Readonly<
+  Record<Exclude<View, "side">, { head: PartName; torso: PartName; front: boolean }>
+> = {
+  down: { head: "headDown", torso: "torsoDown", front: true },
+  downSide: { head: "headDownSide", torso: "torsoDownSide", front: true },
+  up: { head: "headUp", torso: "torsoUp", front: false },
+  upSide: { head: "headUpSide", torso: "torsoUpSide", front: false },
+};
+
+/** Column of the fringe's gap in the front-facing heads, where the bouncing strand lands. */
+const FRINGE_GAP: Readonly<Record<"down" | "downSide", number>> = { down: 7, downSide: 9 };
 
 /**
  * Leg lifts (left, right) per front/back walk frame: both feet are down on the two contacts,
@@ -243,10 +344,11 @@ function recipe(view: View, animation: Animation, index: number): Stamp[] {
   const arms = walking ? (FRONT_ARMS[step] ?? [0, 0]) : [0, 0];
   stamps.push({ part: "legLeft", x: 4, y: 13 + (legs[0] ?? 0) });
   stamps.push({ part: "legRight", x: 8, y: 13 + (legs[1] ?? 0) });
-  stamps.push({ part: view === "down" ? "torsoDown" : "torsoUp", x: 3, y: 8 + bob });
+  const parts = FRONT_PARTS[view];
+  stamps.push({ part: parts.torso, x: 3, y: 8 + bob });
   stamps.push({ part: "hemFront", x: 3 + hem, y: 12 + bob });
   stamps.push({
-    part: view === "down" ? "armLeft" : "armLeftBack",
+    part: parts.front ? "armLeft" : "armLeftBack",
     x: 2,
     y: 9 + bob + (arms[0] ?? 0),
   });
@@ -255,8 +357,15 @@ function recipe(view: View, animation: Animation, index: number): Stamp[] {
   } else {
     stamps.push({ part: "armRight", x: 12, y: 9 + bob + (arms[1] ?? 0) });
   }
-  stamps.push({ part: view === "down" ? "headDown" : "headUp", x: 2, y: bob + nod });
-  if (bounce && view === "down") stamps.push({ part: "fringeDown", x: 7, y: 4 + bob });
+  stamps.push({ part: parts.head, x: 2, y: bob + nod });
+  if (bounce) {
+    // Footfalls: a fringe strand drops in front; from behind, the top block springs up.
+    if (view === "down" || view === "downSide") {
+      stamps.push({ part: "fringeDown", x: FRINGE_GAP[view], y: 4 + bob });
+    } else {
+      stamps.push({ part: "crownBounce", x: 2, y: bob - 1 });
+    }
+  }
   return stamps;
 }
 
@@ -279,7 +388,7 @@ export function mirror(rows: readonly string[]): string[] {
 
 /** One frame as FRAME_HEIGHT rows of FRAME_WIDTH legend characters. */
 export function playerFrame(direction: Direction, animation: Animation, index: number): string[] {
-  const view: View = direction === "down" ? "down" : direction === "up" ? "up" : "side";
+  const view = VIEWS[direction];
   const canvas = Array.from({ length: FRAME_HEIGHT }, () =>
     Array<string>(FRAME_WIDTH).fill(TRANSPARENT),
   );
@@ -287,7 +396,7 @@ export function playerFrame(direction: Direction, animation: Animation, index: n
     stamp(canvas, PARTS[entry.part], entry.x, entry.y);
   }
   const rows = canvas.map((line) => line.join(""));
-  return direction === "left" ? mirror(rows) : rows;
+  return MIRRORED.has(direction) ? mirror(rows) : rows;
 }
 
 /** Writes a grid of legend characters into RGBA pixels (row-major, top row first). */

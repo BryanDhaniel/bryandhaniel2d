@@ -1,6 +1,6 @@
 "use client";
 
-import { useFrame } from "@react-three/fiber";
+import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo } from "react";
 import * as THREE from "three";
 import { useStore } from "zustand";
@@ -15,6 +15,7 @@ import {
 } from "@/game3d/config/visuals";
 import { LAMP_HEAD } from "@/game3d/entities/Props";
 import { useRuntime } from "@/game3d/runtime";
+import { CascadedShadows } from "./CascadedShadows";
 import { linearRgb } from "./DayNightCycle";
 
 const KIND_COLORS = Object.fromEntries(
@@ -85,13 +86,16 @@ function SunRig() {
     dir.set(sun[0] ?? 0, sun[1] ?? 1, sun[2] ?? 0).normalize();
     focus.set(runtime.camera.focusX, 0, runtime.camera.focusZ);
     if (light.castShadow) {
+      light.shadow.bias = runtime.tuning.shadowBias;
+      light.shadow.normalBias = runtime.tuning.shadowNormalBias;
       // Fit a square frustum around the visible ground, rounded up so zooming doesn't shimmer.
-      const zoom = (camera as THREE.OrthographicCamera).zoom || 1;
-      const viewW = size.width / zoom;
-      const viewH = size.height / zoom / SIN_PITCH;
-      const half =
-        Math.ceil((0.5 * Math.hypot(viewW, viewH) + SUN.frustumPadding) / SUN.frustumStep) *
-        SUN.frustumStep;
+      // In perspective the near ground matters most: a fixed square around the player.
+      let reach = SUN.perspectiveHalf;
+      if (camera instanceof THREE.OrthographicCamera) {
+        const zoom = camera.zoom || 1;
+        reach = 0.5 * Math.hypot(size.width / zoom, size.height / zoom / SIN_PITCH);
+      }
+      const half = Math.ceil((reach + SUN.frustumPadding) / SUN.frustumStep) * SUN.frustumStep;
       const shadowCamera = light.shadow.camera;
       if (half !== scratch.half) {
         scratch.half = half;
@@ -442,10 +446,15 @@ function Shafts() {
 export function Lighting() {
   const runtime = useRuntime();
   const level = useStore(runtime.store, (state) => state.level);
+  const mode = useStore(runtime.store, (state) => state.cameraMode);
+  const camera = useThree((state) => state.camera);
   const tier = QUALITY_TIERS[level];
+  // Third-person on High: cascades take over from the single fitted sun shadow.
+  const cascaded =
+    tier.cascadedShadows && mode === "thirdPerson" && camera instanceof THREE.PerspectiveCamera;
   return (
     <>
-      <SunRig />
+      {cascaded ? <CascadedShadows mapSize={tier.shadowMapSize / 2} /> : <SunRig />}
       <Hemisphere />
       <LightPool />
       {tier.cones ? <Cones /> : null}

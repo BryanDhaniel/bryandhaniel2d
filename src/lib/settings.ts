@@ -1,7 +1,10 @@
 import {
+  isCameraMode,
   isQualitySetting,
   isTimeMode,
   isWeatherKind,
+  type CameraMode,
+  type CameraOptions,
   type QualitySetting,
   type TimeMode,
   type WeatherKind,
@@ -32,6 +35,20 @@ export function storedQuality(value: string | null, fallback: QualitySetting): Q
   return isQualitySetting(value) ? value : fallback;
 }
 
+export function storedCameraMode(value: string | null): CameraMode {
+  return isCameraMode(value) ? value : "isometric";
+}
+
+/** Third-person camera options; auto-recenter is on unless the visitor turned it off. */
+export function readCameraOptions(): CameraOptions {
+  return {
+    invertY: readFlag("local", STORAGE_KEYS.invertY, false),
+    autoRecenter: readFlag("local", STORAGE_KEYS.autoRecenter, true),
+    pointerLock: readFlag("local", STORAGE_KEYS.pointerLock, false),
+    jump: readFlag("local", STORAGE_KEYS.jump, false),
+  };
+}
+
 export interface VillageSettings {
   timeMode: TimeMode;
   weather: WeatherKind;
@@ -39,6 +56,8 @@ export interface VillageSettings {
   pixelMode: boolean;
   grain: boolean;
   aberration: boolean;
+  cameraMode: CameraMode;
+  camera: CameraOptions;
 }
 
 /** Reads the visitor's saved settings (with defaults) straight from localStorage. */
@@ -50,5 +69,7 @@ export function readVillageSettings(defaultQuality: QualitySetting): VillageSett
     pixelMode: readFlag("local", STORAGE_KEYS.pixelMode, false),
     grain: readFlag("local", STORAGE_KEYS.grain, false),
     aberration: readFlag("local", STORAGE_KEYS.aberration, false),
+    cameraMode: storedCameraMode(readStorage("local", STORAGE_KEYS.cameraMode)),
+    camera: readCameraOptions(),
   };
 }

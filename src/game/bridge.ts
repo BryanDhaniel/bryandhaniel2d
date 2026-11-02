@@ -1,5 +1,8 @@
 import type { SectionId } from "@/content/portfolio";
 import type {
+  CameraMode,
+  CameraOptions,
+  CameraTuning,
   DayPhase,
   QualityLevel,
   QualitySetting,
@@ -112,6 +115,22 @@ export interface PlayerPosition {
   /** Position in tiles (fractional). The same object is reused between events. */
   x: number;
   y: number;
+  /** Direction the player faces and the camera looks, as map angles (0 = map north, clockwise). */
+  heading: number;
+  viewYaw: number;
+}
+
+/** A floating building marker in third-person view. The same objects are reused per frame. */
+export interface Waypoint {
+  sectionId: SectionId;
+  label: string;
+  /** CSS pixels inside the game container. */
+  x: number;
+  y: number;
+  /** Distance from the player in world units, and 0-1 opacity (fades with distance). */
+  distance: number;
+  opacity: number;
+  visible: boolean;
 }
 
 export interface ScreenPoint {
@@ -133,6 +152,13 @@ export interface GameToUiEvents {
   promptPosition: ScreenPoint;
   clock: { phase: DayPhase };
   qualityLevel: { level: QualityLevel; setting: QualitySetting };
+  /** The view changed (from the HUD, the V key or a gamepad). */
+  cameraMode: { mode: CameraMode };
+  pointerLock: { locked: boolean };
+  /** Third-person waypoints, every frame while that view is active. */
+  waypoints: readonly Waypoint[];
+  /** The live tuning values (sent once when the debug panel asks). */
+  tuning: CameraTuning;
   lowFps: null;
   fatal: { reason: "webgl" | "assets" | "runtime"; message: string };
 }
@@ -150,6 +176,18 @@ export interface UiToGameEvents {
   interact: null;
   travel: { sectionId: SectionId };
   resetInput: null;
+  setCameraMode: { mode: CameraMode };
+  setCameraOptions: CameraOptions;
+  /** Puts the third-person camera back behind the player (the C key). */
+  resetCamera: null;
+  /** Analog movement from the virtual joystick: x right, y forward, length up to 1. */
+  move: { x: number; y: number };
+  /** The touch run toggle. */
+  run: { on: boolean };
+  /** Quick travel: jump to a building's doorway (the UI covers it with a fade). */
+  teleport: { sectionId: SectionId };
+  tune: CameraTuning;
+  requestTuning: null;
 }
 
 export type Events = GameToUiEvents & UiToGameEvents;

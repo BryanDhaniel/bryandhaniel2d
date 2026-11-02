@@ -1,35 +1,63 @@
 "use client";
 
-import { useFrame, useThree } from "@react-three/fiber";
-import { useEffect, useMemo } from "react";
-import * as THREE from "three";
-import type { ScreenPoint } from "@/game/bridge";
+import { useFrame } from "@react-three/fiber";
+import { useMemo } from "react";
 import { areaNameAt } from "@/game/map/village";
-import { CAMERA, CLOUDS, MOVE, QUALITY_TIERS, WEATHER, WIND } from "@/game3d/config/visuals";
-import { facingFor } from "@/game3d/entities/Characters";
-import { useRuntime } from "@/game3d/runtime";
+import { THIRD_PERSON } from "@/game3d/config/camera";
+import { CLOUDS, INTERACT, MOVE, QUALITY_TIERS, WEATHER, WIND } from "@/game3d/config/visuals";
+import { useRuntime, type WorldRuntime } from "@/game3d/runtime";
 import { useAssets } from "@/game3d/scene/assets";
-import { groundHeight, inZone } from "@/game3d/world/layout";
+import { angleDelta, damp } from "@/game3d/systems/camera/ThirdPersonRig";
+import { inZone, terrainHeight } from "@/game3d/world/layout";
 
 const LOCATION_EVERY = 0.25;
 const POSITION_EVERY = 0.1;
-const QUARTER = Math.PI / 2;
-const BASE_YAW = (CAMERA.yaw * Math.PI) / 180;
-const PITCH = (CAMERA.pitch * Math.PI) / 180;
+const CONE_COS = Math.cos((INTERACT.cone * Math.PI) / 180);
 
-function ease(t: number): number {
-  return t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
+/**
+ * The doorway the player can use. In the isometric view: the doorway zone they stand in. In
+ * third-person: the nearest door within range that is also inside the camera's view cone,
+ * so what is highlighted is what the visitor is looking at.
+ */
+function findInteractable(runtime: WorldRuntime): number {
+  const { layout, player, camera } = runtime;
+  const buildings = layout.buildings;
+  if (camera.blend < 0.5) {
+    for (let index = 0; index < buildings.length; index += 1) {
+      const building = buildings[index];
+      if (building && inZone(building.zone, player.x, player.z)) return index;
+    }
+    return -1;
+  }
+  let best = -1;
+  let bestScore = Infinity;
+  for (let index = 0; index < buildings.length; index += 1) {
+    const building = buildings[index];
+    if (!building) continue;
+    const dx = building.doorX - player.x;
+    const dz = building.doorZ - player.z;
+    const distance = Math.hypot(dx, dz);
+    if (distance > INTERACT.range) continue;
+    // Standing right in the doorway always counts; otherwise it must be in view.
+    const facing = distance < 0.6 ? 1 : (dx * camera.forwardX + dz * camera.forwardZ) / distance;
+    if (facing < CONE_COS) continue;
+    const score = distance + (1 - facing) * 2;
+    if (score < bestScore) {
+      bestScore = score;
+      best = index;
+    }
+  }
+  return best;
 }
 
 /**
- * The game loop: input, movement and collision, doorways and panels, the clock, weather and
- * shared shader inputs (priority -2), then the camera rig and the HTML prompt position
- * (priority -1). Everything runs before rendering and allocates nothing per frame.
+ * The game loop (priority -2, before the camera director): input, camera-relative movement
+ * with smooth turning, collision, gravity and ground snapping, doorways and panels, the clock,
+ * weather and shared shader inputs. Everything runs before rendering and allocates nothing.
  */
 export function Simulation() {
   const runtime = useRuntime();
   const assets = useAssets();
-  const gl = useThree((state) => state.gl);
 
   const scratch = useMemo(
     () => ({
@@ -40,66 +68,10 @@ export function Simulation() {
       phase: "",
       moved: false,
       nearIndex: -1,
-      position: { x: 0, y: 0 },
-      prompt: { x: Number.NaN, y: Number.NaN } as ScreenPoint,
-      anchor: new THREE.Vector3(),
-      turn: { from: BASE_YAW, to: BASE_YAW, t: 1 },
-      lastTurn: 0,
-      zoomApplied: 0,
+      position: { x: 0, y: 0, heading: 0, viewYaw: 0 },
     }),
     [],
   );
-
-  // Mouse wheel and pinch zoom on the canvas.
-  useEffect(() => {
-    const element = gl.domElement;
-    const clamp = (value: number) => Math.min(CAMERA.maxZoom, Math.max(CAMERA.minZoom, value));
-    const onWheel = (event: WheelEvent) => {
-      runtime.camera.zoomTarget = clamp(
-        runtime.camera.zoomTarget * Math.exp(-event.deltaY * CAMERA.wheelStep),
-      );
-    };
-    const touches = new Map<number, { x: number; y: number }>();
-    let pinch = 0;
-    const spread = () => {
-      const points = [...touches.values()];
-      const a = points[0];
-      const b = points[1];
-      return a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0;
-    };
-    const onDown = (event: PointerEvent) => {
-      if (event.pointerType !== "touch") return;
-      touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
-      if (touches.size === 2) pinch = spread();
-    };
-    const onMove = (event: PointerEvent) => {
-      const touch = touches.get(event.pointerId);
-      if (!touch) return;
-      touch.x = event.clientX;
-      touch.y = event.clientY;
-      if (touches.size === 2 && pinch > 0) {
-        const next = spread();
-        runtime.camera.zoomTarget = clamp(runtime.camera.zoomTarget * (next / pinch));
-        pinch = next;
-      }
-    };
-    const onUp = (event: PointerEvent) => {
-      touches.delete(event.pointerId);
-      pinch = touches.size === 2 ? spread() : 0;
-    };
-    element.addEventListener("wheel", onWheel, { passive: true });
-    element.addEventListener("pointerdown", onDown);
-    element.addEventListener("pointermove", onMove);
-    element.addEventListener("pointerup", onUp);
-    element.addEventListener("pointercancel", onUp);
-    return () => {
-      element.removeEventListener("wheel", onWheel);
-      element.removeEventListener("pointerdown", onDown);
-      element.removeEventListener("pointermove", onMove);
-      element.removeEventListener("pointerup", onUp);
-      element.removeEventListener("pointercancel", onUp);
-    };
-  }, [gl, runtime]);
 
   useFrame((_, rawDelta) => {
     const delta = Math.min(rawDelta, 0.1);
@@ -114,15 +86,26 @@ export function Simulation() {
     }
     if (state.paused) return;
 
-    input.update();
-    const turn = input.consumeTurn();
-    if (turn !== 0) state.turnCamera(turn > 0 ? 1 : -1);
-    const zoomSteps = input.consumeZoom();
-    if (zoomSteps !== 0) {
-      camera.zoomTarget = Math.min(
-        CAMERA.maxZoom,
-        Math.max(CAMERA.minZoom, camera.zoomTarget * (1 + zoomSteps * CAMERA.keyStep)),
-      );
+    input.update(delta);
+
+    // Quick travel: straight to a doorway, facing the door (the HUD covers it with a fade).
+    const teleport = runtime.teleport;
+    if (teleport >= 0) {
+      runtime.teleport = -1;
+      const building = layout.buildings[teleport];
+      if (building) {
+        runtime.path.cancel();
+        player.pendingBuilding = -1;
+        player.x = building.approachX + 0.5;
+        player.z = building.approachZ + 0.5;
+        player.y = terrainHeight(layout, player.x, player.z, MOVE.ramp);
+        player.vy = 0;
+        player.airborne = false;
+        player.heading = Math.atan2(building.doorX - player.x, building.doorZ - player.z);
+        runtime.views.third.reset(player.heading);
+        runtime.views.iso.focus.x = player.x;
+        runtime.views.iso.focus.z = player.z;
+      }
     }
 
     // Tap or travel: plan a route to a tile (and remember the building to open on arrival).
@@ -139,16 +122,16 @@ export function Simulation() {
       player.pendingBuilding = goal >= 0 ? tap.buildingIndex : -1;
     }
 
-    // Movement: keys and D-pad are screen-relative; otherwise follow the planned path.
+    // Movement relative to the camera; otherwise follow the planned path.
     let dirX = 0;
     let dirZ = 0;
-    let run = input.run;
-    const { intent } = input;
-    if (intent.x !== 0 || intent.y !== 0) {
+    const { move } = input.actions;
+    let run = input.actions.run;
+    if (move.x !== 0 || move.y !== 0) {
       runtime.path.cancel();
       player.pendingBuilding = -1;
-      dirX = camera.rightX * intent.x + camera.forwardX * intent.y;
-      dirZ = camera.rightZ * intent.x + camera.forwardZ * intent.y;
+      dirX = camera.rightX * move.x + camera.forwardX * move.y;
+      dirZ = camera.rightZ * move.x + camera.forwardZ * move.y;
     } else if (runtime.path.active && runtime.path.steer(player.x, player.z, scratch.steer)) {
       dirX = scratch.steer.x;
       dirZ = scratch.steer.z;
@@ -165,21 +148,42 @@ export function Simulation() {
         (dirZ / length) * speed * delta,
         MOVE.radius,
       );
-      player.facing = facingFor(runtime, dirX, dirZ);
+      // Turn toward the way we walk at a steady rate.
+      const turn = angleDelta(player.heading, Math.atan2(dirX, dirZ));
+      const step = THIRD_PERSON.turnSpeed * delta;
+      player.heading += Math.abs(turn) <= step ? turn : Math.sign(turn) * step;
       if (!scratch.moved) {
         scratch.moved = true;
         bridge.emit("moved", null);
       }
     }
-    const ground = groundHeight(layout, player.x, player.z);
-    player.y += (ground - player.y) * (1 - Math.exp(-MOVE.heightRate * delta));
 
-    // Doorways: the prompt, the cutaway and opening panels.
-    let nearIndex = -1;
-    for (let index = 0; index < layout.buildings.length && nearIndex < 0; index += 1) {
-      const building = layout.buildings[index];
-      if (building && inZone(building.zone, player.x, player.z)) nearIndex = index;
+    // Gravity, the optional jump and ground snapping (smoothed over tile steps).
+    const ground = terrainHeight(layout, player.x, player.z, MOVE.ramp);
+    if (input.consumeJump() && !player.airborne) {
+      player.vy = MOVE.jumpSpeed;
+      player.airborne = true;
     }
+    if (!player.airborne && player.y - ground > MOVE.snapDistance) {
+      player.airborne = true;
+      player.vy = 0;
+    }
+    if (player.airborne) {
+      player.vy -= MOVE.gravity * delta;
+      player.y += player.vy * delta;
+      if (player.y <= ground) {
+        player.y = ground;
+        player.vy = 0;
+        player.airborne = false;
+        runtime.audio.play("step");
+      }
+    } else {
+      player.y += (ground - player.y) * damp(MOVE.heightRate, delta);
+    }
+
+    // Doorways: the prompt, the highlight, the cutaway and opening panels.
+    const nearIndex = findInteractable(runtime);
+    runtime.nearIndex = nearIndex;
     if (nearIndex !== scratch.nearIndex) {
       scratch.nearIndex = nearIndex;
       const building = layout.buildings[nearIndex];
@@ -191,7 +195,6 @@ export function Simulation() {
           ? { sectionId: building.sectionId, label: building.label }
           : { sectionId: null, label: null },
       );
-      scratch.prompt.x = Number.NaN;
     }
     const nearBuilding = layout.buildings[nearIndex];
     const arrived = runtime.path.arrived;
@@ -243,73 +246,15 @@ export function Simulation() {
     scratch.positionTimer += delta;
     if (scratch.positionTimer >= POSITION_EVERY) {
       scratch.positionTimer = 0;
-      scratch.position.x = player.x;
-      scratch.position.y = player.z;
-      bridge.emit("position", scratch.position);
+      const position = scratch.position;
+      position.x = player.x;
+      position.y = player.z;
+      // Map angles: 0 = up on the map (north, -z), clockwise.
+      position.heading = Math.PI - player.heading;
+      position.viewYaw = -camera.yaw;
+      bridge.emit("position", position);
     }
   }, -2);
-
-  // Camera rig: eased quarter turns, a damped follow clamped to the map, and zoom.
-  useFrame(({ camera: view, size }, rawDelta) => {
-    const delta = Math.min(rawDelta, 0.1);
-    const { camera, player, layout, store, reducedMotion } = runtime;
-    const turnIndex = store.getState().cameraTurn;
-    const turn = scratch.turn;
-    if (turnIndex !== scratch.lastTurn) {
-      scratch.lastTurn = turnIndex;
-      turn.from = camera.yaw;
-      turn.to = BASE_YAW + turnIndex * QUARTER;
-      turn.t = reducedMotion ? 1 : 0;
-    }
-    if (turn.t < 1) turn.t = Math.min(1, turn.t + delta / CAMERA.rotateSeconds);
-    camera.yaw = turn.from + (turn.to - turn.from) * ease(turn.t);
-    camera.rightX = Math.cos(camera.yaw);
-    camera.rightZ = -Math.sin(camera.yaw);
-    camera.forwardX = -Math.sin(camera.yaw);
-    camera.forwardZ = -Math.cos(camera.yaw);
-
-    const follow = reducedMotion ? 1 : 1 - Math.exp(-CAMERA.followRate * delta);
-    const margin = CAMERA.boundsMargin;
-    const targetX = Math.min(layout.width - margin, Math.max(margin, player.x));
-    const targetZ = Math.min(layout.height - margin, Math.max(margin, player.z));
-    camera.focusX += (targetX - camera.focusX) * follow;
-    camera.focusZ += (targetZ - camera.focusZ) * follow;
-    camera.focusY += (player.y + CAMERA.focusHeight - camera.focusY) * follow;
-    camera.zoom +=
-      (camera.zoomTarget - camera.zoom) *
-      (reducedMotion ? 1 : 1 - Math.exp(-CAMERA.zoomRate * delta));
-
-    if (view instanceof THREE.OrthographicCamera) {
-      const zoom = (Math.min(size.width, size.height) / CAMERA.unitsOnShortSide) * camera.zoom;
-      if (Math.abs(zoom - scratch.zoomApplied) > 1e-3) {
-        scratch.zoomApplied = zoom;
-        view.zoom = zoom;
-        view.updateProjectionMatrix();
-      }
-    }
-    const horizontal = Math.cos(PITCH) * CAMERA.distance;
-    view.position.set(
-      camera.focusX + Math.sin(camera.yaw) * horizontal,
-      camera.focusY + Math.sin(PITCH) * CAMERA.distance,
-      camera.focusZ + Math.cos(camera.yaw) * horizontal,
-    );
-    view.lookAt(camera.focusX, camera.focusY, camera.focusZ);
-    view.updateMatrixWorld();
-
-    // Where the HTML prompt goes: above the door of the building the player is at.
-    const index = scratch.nearIndex;
-    const model = runtime.buildings[index];
-    if (model) {
-      scratch.anchor.copy(model.prompt).project(view);
-      const x = Math.round(((scratch.anchor.x + 1) / 2) * size.width);
-      const y = Math.round(((1 - scratch.anchor.y) / 2) * size.height);
-      if (x !== scratch.prompt.x || y !== scratch.prompt.y) {
-        scratch.prompt.x = x;
-        scratch.prompt.y = y;
-        runtime.bridge.emit("promptPosition", scratch.prompt);
-      }
-    }
-  }, -1);
 
   return null;
 }

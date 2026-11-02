@@ -1,12 +1,13 @@
 "use client";
 
+import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo } from "react";
 import * as THREE from "three";
 import { mergeGeometries } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { hash2 } from "@/game/art/pixels";
 import { PALETTE, type PaletteName } from "@/game/palette";
 import type { TreeVariant } from "@/game/map/village";
-import { WORLD } from "@/game3d/config/visuals";
+import { QUALITY_TIERS, WORLD } from "@/game3d/config/visuals";
 import { useRuntime } from "@/game3d/runtime";
 import { useAssets } from "@/game3d/scene/assets";
 import { patchMaterial } from "@/game3d/shaders/patch";
@@ -14,6 +15,7 @@ import { pixelCanvas, pixelTexture } from "@/game3d/textures/canvas";
 import type { SurfaceName } from "@/game3d/textures/surfaces";
 import { groundHeight, type Placement } from "@/game3d/world/layout";
 import { Kit, blob, texturedCylinder } from "./kit";
+import { InstancedLod } from "./lod";
 
 /** Height of the lamp heads (light sources and volumetric cones hang from here). */
 export const LAMP_HEAD = 1.95;
@@ -73,8 +75,42 @@ const TREES: Record<TreeVariant, TreeShape> = {
   },
 };
 
+/**
+ * Simpler stand-ins for the far levels of detail: fewer facets and blobs (mid), then a single
+ * shape with no trunk (far), drawn with the same materials so the switch is hard to spot.
+ */
+const TREE_LODS: Record<
+  TreeVariant,
+  () => { trunk: THREE.BufferGeometry; canopy: THREE.BufferGeometry; far: THREE.BufferGeometry }
+> = {
+  oak: () => ({
+    trunk: texturedCylinder(0.1, 0.15, 1.35, 4).translate(0, 0.67, 0),
+    canopy: merged([
+      blob(0.78, 1, 0).translate(0, 1.8, 0),
+      blob(0.6, 2, 0).translate(0.38, 1.5, 0.2),
+    ]),
+    far: blob(0.95, 1, 0).translate(0, 1.7, 0),
+  }),
+  pine: () => ({
+    trunk: texturedCylinder(0.07, 0.1, 0.9, 4).translate(0, 0.45, 0),
+    canopy: merged([
+      texturedCylinder(0, 0.74, 1.05, 5).translate(0, 1.05, 0),
+      texturedCylinder(0, 0.5, 1.4, 5).translate(0, 1.85, 0),
+    ]),
+    far: texturedCylinder(0, 0.78, 2.6, 5).translate(0, 1.5, 0),
+  }),
+  birch: () => ({
+    trunk: texturedCylinder(0.07, 0.09, 1.9, 4).translate(0, 0.95, 0),
+    canopy: merged([
+      blob(0.5, 4, 0).translate(0, 2.05, 0),
+      blob(0.46, 5, 0).translate(0.14, 1.65, 0.1),
+    ]),
+    far: blob(0.6, 4, 0).translate(0, 1.9, 0),
+  }),
+};
+
 /** A tuft of pixel grass (or flowers) on a transparent 8x8 canvas. */
-function tuftTexture(flowers: boolean): THREE.CanvasTexture {
+export function tuftTexture(flowers: boolean): THREE.CanvasTexture {
   const { canvas, ctx } = pixelCanvas(8, 8);
   const blade = (x: number, height: number, color: PaletteName) => {
     ctx.fillStyle = PALETTE[color];
@@ -97,7 +133,7 @@ function tuftTexture(flowers: boolean): THREE.CanvasTexture {
   return pixelTexture(canvas);
 }
 
-function crossedQuads(width: number, height: number): THREE.BufferGeometry {
+export function crossedQuads(width: number, height: number): THREE.BufferGeometry {
   const a = new THREE.PlaneGeometry(width, height).translate(0, height / 2, 0);
   const b = a.clone().rotateY(Math.PI / 2);
   const geometry = merged([a, b]);
@@ -133,6 +169,9 @@ function instanced(
   return mesh;
 }
 
+/** Seconds between level-of-detail updates. */
+const LOD_EVERY = 0.25;
+
 /** Trees, bushes, rocks, grass, lamps, stalls, benches, the well, fences and the fountain. */
 export function Props() {
   const runtime = useRuntime();
@@ -146,21 +185,46 @@ export function Props() {
     const ground = (placement: { x: number; z: number }) =>
       groundHeight(layout, placement.x, placement.z);
 
-    // Trees: one instanced trunk and canopy per variant.
+    // Trees: instanced per variant in three levels of detail (re-bucketed in third-person).
+    const lods: InstancedLod[] = [];
+    const up = new THREE.Vector3(0, 1, 0);
     for (const variant of ["oak", "pine", "birch"] as const) {
       const shape = TREES[variant];
       const placements = layout.trees.filter((tree) => tree.variant === variant);
       if (placements.length === 0) continue;
       const geometry = shape.build();
-      const forestHeight = (placement: Placement) =>
-        layout.heights[Math.floor(placement.z) * layout.width + Math.floor(placement.x)] ?? 0;
-      objects.push(
-        instanced(geometry.trunk, m.surface(shape.trunk), placements, forestHeight, true),
+      const low = TREE_LODS[variant]();
+      const trunk = m.surface(shape.trunk);
+      const canopy = m.surface(shape.canopy);
+      const matrices = placements.map((placement) =>
+        new THREE.Matrix4().compose(
+          new THREE.Vector3(
+            placement.x,
+            layout.heights[Math.floor(placement.z) * layout.width + Math.floor(placement.x)] ?? 0,
+            placement.z,
+          ),
+          new THREE.Quaternion().setFromAxisAngle(up, placement.rotation),
+          new THREE.Vector3().setScalar(placement.scale),
+        ),
       );
-      objects.push(
-        instanced(geometry.canopy, m.surface(shape.canopy), placements, forestHeight, true),
+      const lod = new InstancedLod(
+        [
+          [
+            { geometry: geometry.trunk, material: trunk },
+            { geometry: geometry.canopy, material: canopy },
+          ],
+          [
+            { geometry: low.trunk, material: trunk },
+            { geometry: low.canopy, material: canopy },
+          ],
+          [{ geometry: low.far, material: canopy }],
+        ],
+        matrices,
+        [true, true, false],
       );
-      disposables.push(geometry.trunk, geometry.canopy);
+      lods.push(lod);
+      objects.push(...lod.objects);
+      disposables.push(geometry.trunk, geometry.canopy, low.trunk, low.canopy, low.far, lod);
     }
 
     const bushGeometry = blob(0.44, 9).scale(1, 0.8, 1).translate(0, 0.3, 0);
@@ -210,7 +274,7 @@ export function Props() {
           roughness: 1,
         }),
         runtime.uniforms,
-        { wind: "grass", clouds: true },
+        { wind: "grass", clouds: true, fade: true },
       );
       disposables.push(texture, material);
       objects.push(instanced(tuftGeometry, material, list, ground, false));
@@ -377,10 +441,23 @@ export function Props() {
       objects.push(mesh);
       disposables.push(mesh.geometry);
     }
-    return { objects, disposables };
+    return { objects, disposables, lods };
   }, [layout, assets, runtime.uniforms]);
 
   useEffect(() => () => scene.disposables.forEach((item) => item.dispose()), [scene]);
+
+  // Levels of detail follow the camera a few times a second (and stay full in isometric).
+  const clock = useMemo(() => ({ elapsed: LOD_EVERY }), []);
+  useFrame((_, delta) => {
+    clock.elapsed += delta;
+    if (clock.elapsed < LOD_EVERY) return;
+    clock.elapsed = 0;
+    const { camera } = runtime;
+    const reach = QUALITY_TIERS[runtime.store.getState().level].drawDistance;
+    for (const lod of scene.lods) {
+      lod.update(camera.perspective ? camera : null, reach * 0.35, reach * 0.75);
+    }
+  });
 
   return (
     <group>

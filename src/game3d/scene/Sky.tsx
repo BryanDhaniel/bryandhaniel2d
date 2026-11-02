@@ -3,7 +3,9 @@
 import { useFrame, useThree } from "@react-three/fiber";
 import { useEffect, useMemo } from "react";
 import * as THREE from "three";
+import { FOG } from "@/game3d/config/visuals";
 import { useRuntime } from "@/game3d/runtime";
+import { VillageFog } from "@/game3d/shaders/fog";
 
 const SKY_VERTEX = /* glsl */ `
 varying vec2 vScreen;
@@ -64,7 +66,7 @@ export function Sky() {
   }, []);
 
   useEffect(() => {
-    const fog = new THREE.FogExp2(0x000000, 0.01);
+    const fog = new VillageFog(0x000000, FOG.depthStart, 0.01);
     scene.fog = fog;
     // A soft sky-to-ground gradient as image-based light, scaled by the time of day.
     const envScene = new THREE.Scene();
@@ -121,10 +123,15 @@ export function Sky() {
     if (uniforms.uStars) uniforms.uStars.value = state.stars;
     if (uniforms.uTime) uniforms.uTime.value = runtime.reducedMotion ? 0 : runtime.elapsed;
     const fog = scene.fog;
-    if (fog instanceof THREE.FogExp2) {
+    if (fog instanceof VillageFog) {
       fog.color.setRGB(state.fogColor[0] ?? 0, state.fogColor[1] ?? 0, state.fogColor[2] ?? 0);
-      fog.density = state.fogDensity * (1 + runtime.weather.rain * 1.5);
+      // The diorama fogs its far side; third-person fogs the distance so the world never ends.
+      const blend = runtime.camera.blend;
+      fog.start = FOG.depthStart + (FOG.thirdPersonStart - FOG.depthStart) * blend;
+      const thicken = 1 + (FOG.thirdPersonDensity - 1) * blend;
+      fog.density = state.fogDensity * thicken * (1 + runtime.weather.rain * 1.5);
     }
+    backdrop.material.visible = !runtime.camera.perspective;
     scene.environmentIntensity = state.environment;
     // Low quality tone-maps in the renderer; the post stack applies its own exposure.
     gl.toneMappingExposure = state.exposure;

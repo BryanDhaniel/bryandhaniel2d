@@ -1,6 +1,13 @@
 import { createStore } from "zustand/vanilla";
 import type { BuildingId } from "@/game/map/village";
-import type { QualityLevel, QualitySetting, TimeMode, WeatherKind } from "@/game/settings/types";
+import type {
+  CameraMode,
+  CameraOptions,
+  QualityLevel,
+  QualitySetting,
+  TimeMode,
+  WeatherKind,
+} from "@/game/settings/types";
 
 /**
  * Discrete game state that components react to (settings, the quality tier, the camera turn,
@@ -19,6 +26,8 @@ export interface VillageState {
   paused: boolean;
   /** Quarter turns of the camera around the village (Q / R). */
   cameraTurn: number;
+  cameraMode: CameraMode;
+  cameraOptions: CameraOptions;
   /** Doorway the player is standing in, if any. */
   near: BuildingId | null;
   /** DPR factor from the performance monitor (Auto quality), 0.5 to 1. */
@@ -33,6 +42,10 @@ export interface VillageState {
   setVisualOptions: (options: { pixelMode: boolean; grain: boolean; aberration: boolean }) => void;
   setPaused: (paused: boolean) => void;
   turnCamera: (direction: 1 | -1) => void;
+  /** Sets the quarter-turn index directly (leaving third-person picks the nearest turn). */
+  setCameraTurn: (turn: number) => void;
+  setCameraMode: (mode: CameraMode) => void;
+  setCameraOptions: (options: CameraOptions) => void;
   setNear: (near: BuildingId | null) => void;
   setDprFactor: (factor: number) => void;
   setInteractive: () => void;
@@ -47,6 +60,8 @@ export interface VillageStoreInit {
   pixelMode: boolean;
   grain: boolean;
   aberration: boolean;
+  cameraMode: CameraMode;
+  cameraOptions: CameraOptions;
 }
 
 export function createVillageStore(init: VillageStoreInit) {
@@ -65,6 +80,9 @@ export function createVillageStore(init: VillageStoreInit) {
     setVisualOptions: (options) => set(options),
     setPaused: (paused) => set({ paused }),
     turnCamera: (direction) => set((state) => ({ cameraTurn: state.cameraTurn + direction })),
+    setCameraTurn: (cameraTurn) => set({ cameraTurn }),
+    setCameraMode: (cameraMode) => set({ cameraMode }),
+    setCameraOptions: (cameraOptions) => set({ cameraOptions }),
     setNear: (near) => set({ near }),
     setDprFactor: (dprFactor) => set({ dprFactor }),
     setInteractive: () => set({ interactive: true }),

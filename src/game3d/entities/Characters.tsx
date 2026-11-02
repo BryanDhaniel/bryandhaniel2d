@@ -6,7 +6,7 @@ import { useStore } from "zustand";
 import type { Facing } from "@/game/art/characters";
 import type { NpcKind } from "@/game/map/village";
 import { MOVE, QUALITY_TIERS, SPRITES } from "@/game3d/config/visuals";
-import { useRuntime, type WorldRuntime } from "@/game3d/runtime";
+import { billboardYaw, useRuntime, type WorldRuntime } from "@/game3d/runtime";
 import { useAssets } from "@/game3d/scene/assets";
 import { PathFollower } from "@/game3d/systems/pathing";
 import { GridPathfinder } from "@/game3d/systems/pathfinding";
@@ -133,7 +133,6 @@ export function Characters() {
   useFrame((_, rawDelta) => {
     const delta = Math.min(rawDelta, 0.1);
     const { layout, player, camera } = runtime;
-    const yaw = camera.yaw;
     const sun = runtime.cycle.state.sunDirection;
     const sunYaw = Math.atan2(sun[0] ?? 0, sun[2] ?? 1);
     const time = runtime.elapsed;
@@ -177,7 +176,7 @@ export function Characters() {
       }
       const y = groundHeight(layout, walker.x, walker.z);
       walker.billboard.sunYaw = sunYaw;
-      walker.billboard.place(walker.x, y, walker.z, yaw);
+      walker.billboard.place(walker.x, y, walker.z, billboardYaw(runtime, walker.x, walker.z));
       const walking = walker.moving && !near;
       if (walker.kind === "cat") {
         const { cat } = CHARACTER_SHEET;
@@ -256,7 +255,7 @@ export function Characters() {
         );
       }
       bird.billboard.sunYaw = sunYaw;
-      bird.billboard.place(bird.x, bird.y, bird.z, yaw);
+      bird.billboard.place(bird.x, bird.y, bird.z, billboardYaw(runtime, bird.x, bird.z));
     }
   });
 

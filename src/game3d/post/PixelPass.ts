@@ -20,12 +20,16 @@ uniform float outlineStrength;
 uniform float outlineDepth;
 uniform float cameraNear;
 uniform float cameraFar;
+uniform float perspective;
 varying vec2 vUv;
 
 float depthAt(ivec2 p) {
   p = clamp(p, ivec2(0), ivec2(lowSize) - 1);
-  // Orthographic depth is linear.
-  return cameraNear + texelFetch(tDepth, p, 0).r * (cameraFar - cameraNear);
+  float d = texelFetch(tDepth, p, 0).r;
+  // Orthographic depth is linear; perspective depth is hyperbolic.
+  float linear = cameraNear + d * (cameraFar - cameraNear);
+  float hyperbolic = (cameraNear * cameraFar) / (cameraFar - d * (cameraFar - cameraNear));
+  return mix(linear, hyperbolic, perspective);
 }
 
 void main() {
@@ -51,11 +55,14 @@ export class PixelRenderPass extends Pass {
   private readonly target: THREE.WebGLRenderTarget;
   private readonly material: THREE.ShaderMaterial;
 
+  private worldCamera: THREE.Camera;
+
   constructor(
     private readonly worldScene: THREE.Scene,
-    private readonly worldCamera: THREE.Camera,
+    camera: THREE.Camera,
   ) {
     super("PixelRenderPass");
+    this.worldCamera = camera;
     this.needsSwap = false;
     this.target = new THREE.WebGLRenderTarget(1, 1, {
       type: THREE.HalfFloatType,
@@ -74,6 +81,7 @@ export class PixelRenderPass extends Pass {
         outlineDepth: { value: PIXEL_MODE.outlineDepth },
         cameraNear: { value: 1 },
         cameraFar: { value: 100 },
+        perspective: { value: 0 },
       },
       vertexShader: VERTEX,
       fragmentShader: FRAGMENT,
@@ -89,16 +97,22 @@ export class PixelRenderPass extends Pass {
     inputBuffer: THREE.WebGLRenderTarget | null,
   ): void {
     const camera = this.worldCamera;
-    if (camera instanceof THREE.OrthographicCamera) {
+    if (camera instanceof THREE.OrthographicCamera || camera instanceof THREE.PerspectiveCamera) {
       const uniforms = this.material.uniforms;
       if (uniforms.cameraNear) uniforms.cameraNear.value = camera.near;
       if (uniforms.cameraFar) uniforms.cameraFar.value = camera.far;
+      if (uniforms.perspective)
+        uniforms.perspective.value = camera instanceof THREE.PerspectiveCamera ? 1 : 0;
     }
     renderer.setRenderTarget(this.target);
     renderer.clear();
     renderer.render(this.worldScene, camera);
     renderer.setRenderTarget(this.renderToScreen ? null : inputBuffer);
     renderer.render(this.scene, this.camera);
+  }
+
+  override set mainCamera(camera: THREE.Camera) {
+    this.worldCamera = camera;
   }
 
   override setSize(width: number, height: number): void {

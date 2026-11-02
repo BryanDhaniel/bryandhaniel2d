@@ -1,19 +1,21 @@
 "use client";
 
 import { useFrame } from "@react-three/fiber";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import * as THREE from "three";
 import { useStore } from "zustand";
 import type { BuildingId } from "@/game/map/village";
-import { PLAYER_SPRITES } from "@/game3d/config/assets";
+import { PLAYER_MODEL_PATH, PLAYER_SPRITES } from "@/game3d/config/assets";
 import { CHARACTER, PLAYER_SIZE } from "@/game3d/config/character";
 import { LIGHT_STYLES, QUALITY_TIERS, WEATHER, type LightKind } from "@/game3d/config/visuals";
 import { linearRgb } from "@/game3d/lighting/DayNightCycle";
-import { useRuntime } from "@/game3d/runtime";
+import { billboardYaw, useRuntime, type WorldRuntime } from "@/game3d/runtime";
+import { angleDelta } from "@/game3d/systems/camera/ThirdPersonRig";
 import { Billboard } from "../billboard";
 import { PlayerAnimator } from "./animation";
-import { ANIMATIONS, DIRECTIONS } from "./art";
+import { ANIMATIONS, DIRECTIONS, directionFor } from "./art";
 import { createGlowUniforms, patchPlayerGlow } from "./material";
+import { PlayerModel } from "./PlayerModel";
 import { PlayerSheet } from "./sheet";
 
 const KIND_COLORS = Object.fromEntries(
@@ -22,6 +24,14 @@ const KIND_COLORS = Object.fromEntries(
     linearRgb(LIGHT_STYLES[kind].color),
   ]),
 ) as Record<LightKind, [number, number, number]>;
+
+/**
+ * Atlas row for the player seen from a viewpoint at `viewYaw` (the camera's, or the sun's for
+ * the shadow): the heading relative to the way that viewpoint looks, in eight directions.
+ */
+function directionRow(runtime: WorldRuntime, viewYaw: number): number {
+  return DIRECTIONS.indexOf(directionFor(angleDelta(viewYaw + Math.PI, runtime.player.heading)));
+}
 
 /** Light kinds that bounce warm light onto the hoodie. */
 const BOUNCERS: ReadonlySet<LightKind> = new Set(["lamp", "lantern", "fire", "forge"]);
@@ -82,6 +92,26 @@ export function Player() {
 
   useEffect(() => actor.billboard.setShadowMode(realShadows), [actor, realShadows]);
 
+  // The optional 3D model replaces the billboard when its file exists.
+  const [model, setModel] = useState<PlayerModel | null>(null);
+  useEffect(() => {
+    if (!PLAYER_MODEL_PATH) return;
+    let cancelled = false;
+    let loaded: PlayerModel | null = null;
+    void PlayerModel.load(PLAYER_MODEL_PATH, actor.glow).then((next) => {
+      if (cancelled) {
+        next?.dispose();
+        return;
+      }
+      loaded = next;
+      setModel(next);
+    });
+    return () => {
+      cancelled = true;
+      loaded?.dispose();
+    };
+  }, [actor]);
+
   useFrame((_, rawDelta) => {
     const delta = Math.min(rawDelta, 0.1);
     const { player, camera, cycle } = runtime;
@@ -95,16 +125,32 @@ export function Player() {
       else animator.cancelInteract();
     }
     animator.update(delta, player.moving, player.running);
-    if (animator.footfall) runtime.audio.play("step");
-    const rect = sheet.rect(
-      DIRECTIONS.indexOf(player.facing),
-      ANIMATIONS.indexOf(animator.animation),
-      animator.frame,
-    );
-    if (rect) billboard.setRect(rect, sheet.width, sheet.height);
+    if (animator.footfall) {
+      runtime.audio.play("step");
+      const steps = runtime.footsteps;
+      steps.count += 1;
+      steps.x = player.x;
+      steps.z = player.z;
+    }
     const sun = cycle.state.sunDirection;
     billboard.sunYaw = Math.atan2(sun[0] ?? 0, sun[2] ?? 1);
-    billboard.place(player.x, player.y, player.z, camera.yaw);
+    const animation = ANIMATIONS.indexOf(animator.animation);
+    const rect = sheet.rect(directionRow(runtime, camera.yaw), animation, animator.frame);
+    if (rect) billboard.setRect(rect, sheet.width, sheet.height);
+    // The shadow is the silhouette the sun sees (a profile when the camera sees the back).
+    const shadowRect = sheet.rect(
+      directionRow(runtime, billboard.sunYaw),
+      animation,
+      animator.frame,
+    );
+    if (shadowRect) billboard.setShadowRect(shadowRect, sheet.width, sheet.height);
+    glow.uFade.value = camera.blend > 0.5 ? runtime.views.third.fade : 1;
+    billboard.mesh.visible = model === null;
+    if (model) {
+      model.update(delta, player.moving ? (player.running ? "run" : "walk") : "idle");
+      model.place(player.x, player.y, player.z, player.heading, glow.uFade.value);
+    }
+    billboard.place(player.x, player.y, player.z, billboardYaw(runtime, player.x, player.z));
 
     // Rim light: the key light by day, the nearest lamp when it is brighter.
     const state = cycle.state;
@@ -171,6 +217,7 @@ export function Player() {
     <>
       <primitive object={actor.billboard.mesh} />
       <primitive object={actor.billboard.blob} />
+      {model ? <primitive object={model.root} /> : null}
     </>
   );
 }

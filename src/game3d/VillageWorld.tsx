@@ -5,7 +5,13 @@ import { useEffect, useState, type RefObject } from "react";
 import * as THREE from "three";
 import { useStore } from "zustand";
 import type { GameBridge } from "@/game/bridge";
-import type { QualitySetting, TimeMode, WeatherKind } from "@/game/settings/types";
+import type {
+  CameraMode,
+  CameraOptions,
+  QualitySetting,
+  TimeMode,
+  WeatherKind,
+} from "@/game/settings/types";
 import { CAMERA, QUALITY_TIERS } from "@/game3d/config/visuals";
 import { createRuntime, RuntimeContext } from "@/game3d/runtime";
 import { World } from "@/game3d/scene/World";
@@ -23,6 +29,8 @@ export interface VillageOptions {
   pixelMode: boolean;
   grain: boolean;
   aberration: boolean;
+  cameraMode: CameraMode;
+  camera: CameraOptions;
 }
 
 interface VillageWorldProps {
@@ -58,6 +66,8 @@ export default function VillageWorld({
       pixelMode: options.pixelMode,
       grain: options.grain,
       aberration: options.aberration,
+      cameraMode: options.cameraMode,
+      cameraOptions: options.camera,
     });
     const quality = new QualityManager(options.quality, (next, setting) => {
       store.getState().setQuality(setting, next);
@@ -86,8 +96,25 @@ export default function VillageWorld({
     const subscriptions = [
       bridge.on("pause", ({ paused: next }) => {
         state().setPaused(next);
+        // A panel takes over: let go of keys, drags and the captured mouse.
         if (next) runtime.input.reset();
       }),
+      bridge.on("setCameraMode", ({ mode }) => state().setCameraMode(mode)),
+      bridge.on("setCameraOptions", (next) => {
+        state().setCameraOptions(next);
+        runtime.cameraOptions = next;
+        runtime.input.setOptions(next);
+      }),
+      bridge.on("resetCamera", () => runtime.input.queueResetCamera()),
+      bridge.on("move", ({ x, y }) => runtime.input.setJoystick(x, y)),
+      bridge.on("run", ({ on }) => runtime.input.setRunToggle(on)),
+      bridge.on("teleport", ({ sectionId }) => {
+        runtime.teleport = runtime.layout.buildings.findIndex(
+          (building) => building.sectionId === sectionId && building.id !== "mailbox",
+        );
+      }),
+      bridge.on("tune", (next) => Object.assign(runtime.tuning, next)),
+      bridge.on("requestTuning", () => bridge.emit("tuning", { ...runtime.tuning })),
       bridge.on("setTimeMode", ({ mode }) => {
         state().setTimeMode(mode);
         runtime.cycle.setMode(mode);

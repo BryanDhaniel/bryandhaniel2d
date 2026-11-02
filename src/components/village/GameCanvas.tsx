@@ -45,7 +45,7 @@ export default function GameCanvas({
       tabIndex={0}
       role="application"
       aria-roledescription="game"
-      aria-label="Pixel village. Walk with the arrow keys or W A S D, hold Shift to run, turn the view with Q and R, zoom with plus and minus, and press E at a door to open that section."
+      aria-label="Pixel village. Walk with W A S D, hold Shift to run, press E at a door to open that section, and V to switch between the isometric and third-person views. In the isometric view the arrow keys also walk and Q and R turn the view; in third-person the arrow keys look around and C puts the camera behind you."
       aria-describedby={describedBy}
       inert={inert}
       onBlur={() => bridge.emit("resetInput", null)}
